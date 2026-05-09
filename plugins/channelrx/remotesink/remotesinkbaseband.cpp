@@ -49,13 +49,9 @@ void RemoteSinkBaseband::reset()
 void RemoteSinkBaseband::startWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &RemoteSinkBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
     m_sink.start();
     m_running = true;
@@ -66,12 +62,7 @@ void RemoteSinkBaseband::stopWork()
     QMutexLocker mutexLocker(&m_mutex);
     m_sink.stop();
     disconnect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
-    QObject::disconnect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &RemoteSinkBaseband::handleData
-    );
+    m_sampleFifo.setDataReadyCallback({});
     m_running = false;
 }
 

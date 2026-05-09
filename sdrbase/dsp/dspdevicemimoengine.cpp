@@ -827,20 +827,12 @@ void DSPDeviceMIMOEngine::handleSetMIMO(DeviceSampleMIMO* mimo)
     if (m_deviceSampleMIMO->getMIMOType() == DeviceSampleMIMO::MIMOHalfSynchronous) // synchronous FIFOs on Rx and not with Tx
     {
         qDebug("DSPDeviceMIMOEngine::handleSetMIMO: synchronous sources set %s", qPrintable(mimo->getDeviceDescription()));
-        QObject::connect(
-            m_deviceSampleMIMO->getSampleMIFifo(),
-            &SampleMIFifo::dataSyncReady,
-            this,
-            &DSPDeviceMIMOEngine::handleDataRxSync,
-            Qt::QueuedConnection
-        );
-        QObject::connect(
-            m_deviceSampleMIMO->getSampleMOFifo(),
-            &SampleMOFifo::dataReadSync,
-            this,
-            &DSPDeviceMIMOEngine::handleDataTxSync,
-            Qt::QueuedConnection
-        );
+        m_deviceSampleMIMO->getSampleMIFifo()->setDataSyncReadyCallback([this]() {
+            QMetaObject::invokeMethod(this, [this]() { handleDataRxSync(); }, Qt::QueuedConnection);
+        });
+        m_deviceSampleMIMO->getSampleMOFifo()->setDataReadSyncCallback([this]() {
+            QMetaObject::invokeMethod(this, [this]() { handleDataTxSync(); }, Qt::QueuedConnection);
+        });
     }
     else if (m_deviceSampleMIMO->getMIMOType() == DeviceSampleMIMO::MIMOAsynchronous) // asynchronous FIFOs
     {
@@ -848,21 +840,22 @@ void DSPDeviceMIMOEngine::handleSetMIMO(DeviceSampleMIMO* mimo)
         {
             qDebug("DSPDeviceMIMOEngine::handleSetMIMO: asynchronous sources set %s channel %u",
                 qPrintable(mimo->getDeviceDescription()), stream);
-            QObject::connect(
-                m_deviceSampleMIMO->getSampleMIFifo(),
-                &SampleMIFifo::dataAsyncReady,
-                this,
-                &DSPDeviceMIMOEngine::handleDataRxAsync,
-                Qt::QueuedConnection
-            );
-            QObject::connect(
-                m_deviceSampleMIMO->getSampleMOFifo(),
-                &SampleMOFifo::dataReadAsync,
-                this,
-                &DSPDeviceMIMOEngine::handleDataTxAsync,
-                Qt::QueuedConnection
-            );
         }
+
+        m_deviceSampleMIMO->getSampleMIFifo()->setDataAsyncReadyCallback([this](int streamIndex) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, streamIndex]() { handleDataRxAsync(streamIndex); },
+                Qt::QueuedConnection
+            );
+        });
+        m_deviceSampleMIMO->getSampleMOFifo()->setDataReadAsyncCallback([this](int streamIndex) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, streamIndex]() { handleDataTxAsync(streamIndex); },
+                Qt::QueuedConnection
+            );
+        });
     }
 }
 

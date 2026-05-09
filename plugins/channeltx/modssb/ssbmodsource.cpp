@@ -186,7 +186,7 @@ void SSBModSource::modulateSample()
         {
             for (auto& dataPipe : dataPipes)
             {
-                DataFifo *fifo = qobject_cast<DataFifo*>(dataPipe->m_element);
+                DataFifo *fifo = getDataFifoFromPipeElement(dataPipe->m_element);
 
                 if (fifo)
                 {
@@ -700,9 +700,11 @@ void SSBModSource::applySettings(const QStringList& settingKeys, const SSBModSet
     if ((settingKeys.contains("modAFInput") && (settings.m_modAFInput != m_settings.m_modAFInput)) || force)
     {
         if (settings.m_modAFInput == SSBModSettings::SSBModInputAudio) {
-            connect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleAudio(); }, Qt::AutoConnection);
+            });
         } else {
-            disconnect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback({});
         }
     }
 

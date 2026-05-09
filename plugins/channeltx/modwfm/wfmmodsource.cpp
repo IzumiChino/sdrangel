@@ -164,7 +164,7 @@ void WFMModSource::pullOne(Sample& sample)
 
             for (; it != dataPipes.end(); ++it)
             {
-                DataFifo *fifo = qobject_cast<DataFifo*>((*it)->m_element);
+                DataFifo *fifo = getDataFifoFromPipeElement((*it)->m_element);
 
                 if (fifo) {
                     fifo->write((quint8*) &m_demodBuffer[0], m_demodBuffer.size() * sizeof(qint16), DataFifo::DataTypeI16);
@@ -433,9 +433,11 @@ void WFMModSource::applySettings(const QStringList& settingsKeys, const WFMModSe
     if ((settingsKeys.contains("modAFInput") && (settings.m_modAFInput != m_settings.m_modAFInput)) || force)
     {
         if (settings.m_modAFInput == WFMModSettings::WFMModInputAudio) {
-            connect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleAudio(); }, Qt::AutoConnection);
+            });
         } else {
-            disconnect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback({});
         }
     }
 

@@ -22,6 +22,11 @@
 #include "dsp/datafifo.h"
 #include "datafifostore.h"
 
+DataPipeElement::DataPipeElement()
+{
+    setObjectName("DataFifo");
+}
+
 DataFifoStore::DataFifoStore()
 {}
 
@@ -32,15 +37,15 @@ DataFifoStore::~DataFifoStore()
 
 QObject *DataFifoStore::createElement()
 {
-    DataFifo *fifo = new DataFifo();
-    m_dataFifos.push_back(fifo);
+    auto *fifoElement = new DataPipeElement();
+    m_dataFifos.push_back(fifoElement);
     qDebug("DataFifoStore::createElement: %d added", (int)m_dataFifos.size() - 1);
-    return fifo;
+    return fifoElement;
 }
 
 void DataFifoStore::deleteElement(QObject *element)
 {
-    int i = m_dataFifos.indexOf((DataFifo*) element);
+    int i = m_dataFifos.indexOf(static_cast<DataPipeElement*>(element));
 
     if (i >= 0)
     {
@@ -57,4 +62,14 @@ void DataFifoStore::deleteAllElements()
     }
 
     m_dataFifos.clear();
+}
+
+DataFifo* getDataFifoFromPipeElement(QObject *element)
+{
+    return element ? static_cast<DataPipeElement*>(element)->getFifo() : nullptr;
+}
+
+const DataFifo* getDataFifoFromPipeElement(const QObject *element)
+{
+    return element ? static_cast<const DataPipeElement*>(element)->getFifo() : nullptr;
 }

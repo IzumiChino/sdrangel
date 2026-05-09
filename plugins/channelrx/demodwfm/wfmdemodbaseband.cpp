@@ -33,21 +33,25 @@ WFMDemodBaseband::WFMDemodBaseband()
     m_channelizer = new DownChannelizer(&m_sink);
 
     qDebug("WFMDemodBaseband::WFMDemodBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &WFMDemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     DSPEngine::instance()->getAudioDeviceManager()->addAudioSink(m_sink.getAudioFifo(), getInputMessageQueue());
     m_sink.applyAudioSampleRate(DSPEngine::instance()->getAudioDeviceManager()->getOutputSampleRate());
     m_channelSampleRate = 0;
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
-    connect(m_sink.getAudioFifo(), &AudioFifo::underflow, this, &WFMDemodBaseband::audioUnderflow);
-    connect(m_sink.getAudioFifo(), &AudioFifo::overflow, this, &WFMDemodBaseband::audioOverflow);
+    m_sink.getAudioFifo()->setUnderflowCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { audioUnderflow(); }, Qt::AutoConnection);
+    });
+    m_sink.getAudioFifo()->setOverflowCallback([this](int) {
+        QMetaObject::invokeMethod(
+            this,
+            [this]() { audioOverflow(); },
+            Qt::AutoConnection
+        );
+    });
 }
 
 WFMDemodBaseband::~WFMDemodBaseband()

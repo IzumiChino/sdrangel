@@ -22,20 +22,18 @@
 const unsigned int SampleMOFifo::m_rwDivisor = 2;
 const unsigned int SampleMOFifo::m_guardDivisor = 10;
 
-SampleMOFifo::SampleMOFifo(QObject *parent) :
-    QObject(parent),
+SampleMOFifo::SampleMOFifo() :
     m_nbStreams(0)
 {}
 
-SampleMOFifo::SampleMOFifo(unsigned int nbStreams, unsigned int size, QObject *parent) :
-    QObject(parent)
+SampleMOFifo::SampleMOFifo(unsigned int nbStreams, unsigned int size)
 {
     init(nbStreams, size);
 }
 
 void SampleMOFifo::init(unsigned int nbStreams, unsigned int size)
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     m_data.resize(nbStreams);
     m_vReadCount.resize(nbStreams);
     m_vReadHead.resize(nbStreams);
@@ -46,7 +44,7 @@ void SampleMOFifo::init(unsigned int nbStreams, unsigned int size)
 
 void SampleMOFifo::resize(unsigned int size)
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     m_size = size;
     m_lowGuard = m_size / m_guardDivisor;
     m_highGuard = m_size - (m_size/m_guardDivisor);
@@ -61,7 +59,7 @@ void SampleMOFifo::resize(unsigned int size)
 
 void SampleMOFifo::reset()
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 	m_readCount = 0;
     m_readHead = 0;
     m_writeHead = m_midPoint;
@@ -83,29 +81,32 @@ void SampleMOFifo::readSync(
     unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
 )
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int spaceLeft = m_size - m_readHead;
-    m_readCount = m_readCount + amount < m_size ? m_readCount + amount : m_size; // cannot exceed FIFO size
-
-    if (amount <= spaceLeft)
     {
-        ipart1Begin = m_readHead;
-        ipart1End = m_readHead + amount;
-        ipart2Begin = m_size;
-        ipart2End = m_size;
-        m_readHead += amount;
-    }
-    else
-    {
-        unsigned int remaining = (amount < m_size ? amount : m_size) - spaceLeft;
-        ipart1Begin = m_readHead;
-        ipart1End = m_size;
-        ipart2Begin = 0;
-        ipart2End = remaining;
-        m_readHead = remaining;
-    }
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        unsigned int spaceLeft = m_size - m_readHead;
+        m_readCount = m_readCount + amount < m_size ? m_readCount + amount : m_size; // cannot exceed FIFO size
 
-    emit dataReadSync();
+        if (amount <= spaceLeft)
+        {
+            ipart1Begin = m_readHead;
+            ipart1End = m_readHead + amount;
+            ipart2Begin = m_size;
+            ipart2End = m_size;
+            m_readHead += amount;
+        }
+        else
+        {
+            unsigned int remaining = (amount < m_size ? amount : m_size) - spaceLeft;
+            ipart1Begin = m_readHead;
+            ipart1End = m_size;
+            ipart2Begin = 0;
+            ipart2End = remaining;
+            m_readHead = remaining;
+        }
+    }
+    if (m_dataReadSyncCallback) {
+        m_dataReadSyncCallback();
+    }
 }
 
 void SampleMOFifo::writeSync(
@@ -114,7 +115,7 @@ void SampleMOFifo::writeSync(
     unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
 )
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     unsigned int rwDelta = m_writeHead >= m_readHead ? m_writeHead - m_readHead : m_size - (m_readHead - m_writeHead);
 
     if (rwDelta < m_lowGuard)
@@ -158,29 +159,32 @@ void SampleMOFifo::readAsync(
     unsigned int stream
 )
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int spaceLeft = m_size - m_vReadHead[stream];
-    m_vReadCount[stream] = m_vReadCount[stream] + amount < m_size ? m_vReadCount[stream] + amount : m_size; // cannot exceed FIFO size
-
-    if (amount <= spaceLeft)
     {
-        ipart1Begin = m_vReadHead[stream];
-        ipart1End = m_vReadHead[stream] + amount;
-        ipart2Begin = m_size;
-        ipart2End = m_size;
-        m_vReadHead[stream] += amount;
-    }
-    else
-    {
-        unsigned int remaining = (amount < m_size ? amount : m_size) - spaceLeft;
-        ipart1Begin = m_vReadHead[stream];
-        ipart1End = m_size;
-        ipart2Begin = 0;
-        ipart2End = remaining;
-        m_vReadHead[stream] = remaining;
-    }
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        unsigned int spaceLeft = m_size - m_vReadHead[stream];
+        m_vReadCount[stream] = m_vReadCount[stream] + amount < m_size ? m_vReadCount[stream] + amount : m_size; // cannot exceed FIFO size
 
-    emit dataReadAsync(stream);
+        if (amount <= spaceLeft)
+        {
+            ipart1Begin = m_vReadHead[stream];
+            ipart1End = m_vReadHead[stream] + amount;
+            ipart2Begin = m_size;
+            ipart2End = m_size;
+            m_vReadHead[stream] += amount;
+        }
+        else
+        {
+            unsigned int remaining = (amount < m_size ? amount : m_size) - spaceLeft;
+            ipart1Begin = m_vReadHead[stream];
+            ipart1End = m_size;
+            ipart2Begin = 0;
+            ipart2End = remaining;
+            m_vReadHead[stream] = remaining;
+        }
+    }
+    if (m_dataReadAsyncCallback) {
+        m_dataReadAsyncCallback(static_cast<int>(stream));
+    }
 }
 
 void SampleMOFifo::writeAsync( //!< in place write with given amount
@@ -190,7 +194,7 @@ void SampleMOFifo::writeAsync( //!< in place write with given amount
     unsigned int stream
 )
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     unsigned int rwDelta = m_vWriteHead[stream] >= m_vReadHead[stream] ?
         m_vWriteHead[stream] - m_vReadHead[stream] : m_size - (m_vReadHead[stream] - m_vWriteHead[stream]);
 

@@ -208,7 +208,7 @@ void M17ModSource::modulateSample()
 
             for (; it != dataPipes.end(); ++it)
             {
-                DataFifo *fifo = qobject_cast<DataFifo*>((*it)->m_element);
+                DataFifo *fifo = getDataFifoFromPipeElement((*it)->m_element);
 
                 if (fifo) {
                     fifo->write((quint8*) &m_modBuffer[0], m_modBuffer.size() * sizeof(qint16), DataFifo::DataTypeI16);
@@ -540,9 +540,11 @@ void M17ModSource::applySettings(const QStringList& settingsKeys, const M17ModSe
     if (settingsKeys.contains("audioType") || force)
     {
         if (settings.m_audioType == M17ModSettings::AudioInput) {
-            connect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleAudio(); }, Qt::AutoConnection);
+            });
         } else {
-            disconnect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback({});
         }
     }
 

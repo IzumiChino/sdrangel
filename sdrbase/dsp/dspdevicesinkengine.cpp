@@ -379,13 +379,9 @@ void DSPDeviceSinkEngine::handleSetSink(const DeviceSampleSink*)
 
     qDebug("DSPDeviceSinkEngine::handleSetSink: set %s", qPrintable(m_deviceSampleSink->getDeviceDescription()));
 
-    QObject::connect(
-        m_deviceSampleSink->getSampleFifo(),
-        &SampleSourceFifo::dataRead,
-        this,
-        &DSPDeviceSinkEngine::handleData,
-        Qt::QueuedConnection
-    );
+	m_deviceSampleSink->getSampleFifo()->setDataReadCallback([this]() {
+		QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+	});
 }
 
 void DSPDeviceSinkEngine::handleData()

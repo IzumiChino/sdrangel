@@ -21,15 +21,16 @@
 #ifndef INCLUDE_DATAFIFO_H
 #define INCLUDE_DATAFIFO_H
 
-#include <QObject>
-#include <QRecursiveMutex>
-#include <QElapsedTimer>
 #include <QByteArray>
+#include <functional>
+#include <mutex>
+#include <chrono>
 
 #include "export.h"
 
-class SDRBASE_API DataFifo : public QObject {
-	Q_OBJECT
+class QObject;
+
+class SDRBASE_API DataFifo {
 public:
 	enum DataType
 	{
@@ -37,15 +38,22 @@ public:
 		DataTypeCI16  //!< Complex (i.e. Re, Im pair of) 16 bit signed integer
 	};
 
-	DataFifo(QObject* parent = nullptr);
-	DataFifo(int size, QObject* parent = nullptr);
+	DataFifo();
+	explicit DataFifo(int size);
     DataFifo(const DataFifo& other);
 	~DataFifo();
 
 	bool setSize(int size);
     void reset();
-	inline unsigned int size() const { return m_size; }
-	inline unsigned int fill() { QMutexLocker mutexLocker(&m_mutex); unsigned int fill = m_fill; return fill; }
+    void setDataReadyCallback(std::function<void()> callback) { m_dataReadyCallback = std::move(callback); }
+	inline unsigned int size() const {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_size;
+	}
+	inline unsigned int fill() {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_fill;
+	}
 
 	unsigned int write(const quint8* data, unsigned int count, DataType dataType);
 	unsigned int write(QByteArray::const_iterator begin, QByteArray::const_iterator end, DataType dataType);
@@ -55,18 +63,16 @@ public:
 	unsigned int readBegin(unsigned int count,
 		QByteArray::iterator* part1Begin, QByteArray::iterator* part1End,
 		QByteArray::iterator* part2Begin, QByteArray::iterator* part2End,
-		DataType& daaType);
+		DataType& dataType);
 	unsigned int readCommit(unsigned int count);
 
-signals:
-	void dataReady();
-
 private:
-	QElapsedTimer m_msgRateTimer;
+	mutable std::mutex m_mutex;
+	std::chrono::steady_clock::time_point m_msgRateTimer;
 	int m_suppressed;
 	QByteArray m_data;
+	std::function<void()> m_dataReadyCallback;
 	DataType m_currentDataType;
-	QRecursiveMutex m_mutex;
 
 	unsigned int m_size;
 	unsigned int m_fill;
@@ -75,5 +81,8 @@ private:
 
 	void create(unsigned int s);
 };
+
+SDRBASE_API DataFifo* getDataFifoFromPipeElement(QObject *element);
+SDRBASE_API const DataFifo* getDataFifoFromPipeElement(const QObject *element);
 
 #endif // INCLUDE_DATAFIFO_H

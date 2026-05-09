@@ -37,13 +37,9 @@ FileSourceBaseband::FileSourceBaseband() :
     m_channelizer = new UpChannelizer(&m_source);
 
     qDebug("FileSourceBaseband::FileSourceBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSourceFifo::dataRead,
-        this,
-        &FileSourceBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }

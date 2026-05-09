@@ -31,13 +31,9 @@ FreqTrackerBaseband::FreqTrackerBaseband()
     m_channelizer = new DownChannelizer(&m_sink);
 
     qDebug("FreqTrackerBaseband::FreqTrackerBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &FreqTrackerBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }

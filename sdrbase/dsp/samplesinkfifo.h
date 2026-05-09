@@ -21,61 +21,61 @@
 #ifndef INCLUDE_SAMPLEFIFO_H
 #define INCLUDE_SAMPLEFIFO_H
 
-#include <QObject>
-#include <QRecursiveMutex>
-#include <QElapsedTimer>
-#include "dsp/dsptypes.h"
+#include <chrono>
+#include <functional>
+
+#include <QString>
+#include <QtGlobal>
+
+#include "samplefifocore.h"
 #include "export.h"
 
-class SDRBASE_API SampleSinkFifo : public QObject {
-	Q_OBJECT
-
+class SDRBASE_API SampleSinkFifo {
 private:
-	QElapsedTimer m_msgRateTimer;
+	std::chrono::steady_clock::time_point m_msgRateTimer;
 	int m_suppressed;
-	SampleVector m_data;
 	int m_total;
 	unsigned int m_writtenSignalCount;
 	unsigned int m_writtenSignalRateDivider;
-	QRecursiveMutex m_mutex;
-
-	unsigned int m_size;
-	unsigned int m_fill;
-	unsigned int m_head;
-	unsigned int m_tail;
 	QString m_label;
-
-	void create(unsigned int s);
+	SampleSinkFifoCore m_core;
+    std::function<void()> m_dataReadyCallback;
+    std::function<void(int)> m_overflowCallback;
+    std::function<void(int)> m_underflowCallback;
+    std::function<void(int, qint64)> m_writtenCallback;
 
 public:
-	SampleSinkFifo(QObject* parent = nullptr);
-	SampleSinkFifo(int size, QObject* parent = nullptr);
+	SampleSinkFifo();
+	explicit SampleSinkFifo(int size);
     SampleSinkFifo(const SampleSinkFifo& other);
 	~SampleSinkFifo();
 
 	bool setSize(int size);
     void reset();
 	void setWrittenSignalRateDivider(unsigned int divider);
-	inline unsigned int size() { QMutexLocker mutexLocker(&m_mutex); unsigned int size = m_size; return size; }
-	inline unsigned int fill() { QMutexLocker mutexLocker(&m_mutex); unsigned int fill = m_fill; return fill; }
+	void setDataReadyCallback(std::function<void()> callback) { m_dataReadyCallback = std::move(callback); }
+	void setOverflowCallback(std::function<void(int)> callback) { m_overflowCallback = std::move(callback); }
+	void setUnderflowCallback(std::function<void(int)> callback) { m_underflowCallback = std::move(callback); }
+	void setWrittenCallback(std::function<void(int, qint64)> callback) { m_writtenCallback = std::move(callback); }
+
+	inline unsigned int size() {
+		return m_core.size();
+	}
+	inline unsigned int fill() {
+		return m_core.fill();
+	}
 
 	unsigned int write(const quint8* data, unsigned int count);
 	unsigned int write(SampleVector::const_iterator begin, SampleVector::const_iterator end);
-
 	unsigned int read(SampleVector::iterator begin, SampleVector::iterator end);
-
 	unsigned int readBegin(unsigned int count,
 		SampleVector::iterator* part1Begin, SampleVector::iterator* part1End,
 		SampleVector::iterator* part2Begin, SampleVector::iterator* part2End);
 	unsigned int readCommit(unsigned int count);
-	void setLabel(const QString& label) { m_label = label; }
-    static unsigned int getSizePolicy(unsigned int sampleRate);
 
-signals:
-	void dataReady();
-	void written(int nsamples, qint64 timestamp);
-	void overflow(int nsamples);
-	void underflow(int nsamples);
+	void setLabel(const QString& label) { m_label = label; }
+    const QString& getLabel() const { return m_label; }
+    static unsigned int getSizePolicy(unsigned int sampleRate);
 };
 
 #endif // INCLUDE_SAMPLEFIFO_H

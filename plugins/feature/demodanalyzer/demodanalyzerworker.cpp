@@ -231,22 +231,13 @@ bool DemodAnalyzerWorker::handleMessage(const Message& cmd)
         qDebug("DemodAnalyzerWorker::handleMessage: MsgConnectFifo: %s", (doConnect ? "connect" : "disconnect"));
 
         if (doConnect) {
-            QObject::connect(
-                m_dataFifo,
-                &DataFifo::dataReady,
-                this,
-                &DemodAnalyzerWorker::handleData,
-                Qt::QueuedConnection
-            );
+            m_dataFifo->setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+            });
         }
         else
         {
-            QObject::disconnect(
-                m_dataFifo,
-                &DataFifo::dataReady,
-                this,
-                &DemodAnalyzerWorker::handleData
-            );
+            m_dataFifo->setDataReadyCallback({});
         }
 
         return true;

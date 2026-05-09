@@ -37,13 +37,9 @@ LocalSinkBaseband::LocalSinkBaseband() :
     m_channelizer = new DownChannelizer(&m_sink);
 
     qDebug("LocalSinkBaseband::LocalSinkBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &LocalSinkBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
     m_sink.start(m_localSampleSource);
