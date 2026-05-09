@@ -324,7 +324,7 @@ void ATVDemodSink::demod(Complex& c)
         sample /= m_ampDelta;
     }
 
-    // Keep sync detection on the native sync polarity even when the displayed video is inverted.
+    // 0.0 -> 1.0
     float syncSample = (sample < 0.0f) ? 0.0f : (sample > 1.0f) ? 1.0f : sample;
     float displaySample = m_settings.m_invertVideo ? 1.0f - syncSample : syncSample;
 

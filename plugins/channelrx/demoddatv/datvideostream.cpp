@@ -159,6 +159,7 @@ qint64 DATVideostream::readData(char *data, qint64 len)
 
     QMutexLocker mutexLocker(&m_mutex);
 
+    //DATA in FIFO ? -> Waiting for DATA
     while (m_fifo.isEmpty())
     {
         if (m_multiThreaded)
@@ -190,6 +191,7 @@ qint64 DATVideostream::readData(char *data, qint64 len)
         }
     }
 
+    //Read DATA
     while ((effectiveLen < expectedLen) && !m_fifo.isEmpty())
     {
         QByteArray& currentArray = m_fifo.head();
@@ -201,8 +203,10 @@ qint64 DATVideostream::readData(char *data, qint64 len)
         );
 
         if (chunkLen == currentArray.size()) {
+            //Complete Read
             m_fifo.dequeue();
         } else {
+            //Partial Read
             currentArray.remove(0, chunkLen);
         }
 
@@ -210,6 +214,7 @@ qint64 DATVideostream::readData(char *data, qint64 len)
         m_bytesWaiting -= chunkLen;
     }
 
+    //Next available DATA
     m_percentBuffer = (100*m_bytesWaiting) / m_memoryLimit;
     m_percentBuffer = m_percentBuffer > 100 ? 100 : m_percentBuffer;
 

@@ -750,6 +750,7 @@ void GLScope::paintGL()
 
         // draw rect around
         {
+            //GLfloat q3[2*(end - start)];
             GLfloat q3[]{
                 1, 1,
                 0, 1,
@@ -775,7 +776,7 @@ void GLScope::paintGL()
 
         if (getTraceWindow(m_traceSize, m_timeOfsProMill, m_timeBase, polarStart, polarEnd))
         {
-            //GLfloat q3[2*(polarEnd - polarStart)];
+            //GLfloat q3[2*(end - start)];
             GLfloat *q3 = m_q3Polar.m_array;
             const float *trace0 = (*m_traces)[0];
 
@@ -1114,6 +1115,7 @@ void GLScope::applyConfig()
 
     if (validTimeScale)
     {
+        //float t_start = ((m_timeOfsProMill / 1000.0) * ((float) m_traceSize / m_sampleRate)) - ((float) m_triggerPre / m_sampleRate);
         t_start = (((m_timeOfsProMill / 1000.0f) * (float)m_traceSize) / m_sampleRate) - ((float)m_triggerPre / m_sampleRate);
         t_len = ((float)m_traceSize / m_sampleRate) / (float)m_timeBase;
 

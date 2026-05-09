@@ -487,6 +487,7 @@ void ATVModSource::pullVideo(Real& sample)
                         seconds = 1.0;
                     }
 
+                    // take a 10% guard and divide bandwidth between all cameras as a hideous hack
                     camera.m_videoFPS = (nbFrames / seconds) * 0.9;
                     camera.m_videoFPSq = camera.m_videoFPS / m_fps;
                     camera.m_videoFPSCount = camera.m_videoFPSq;
