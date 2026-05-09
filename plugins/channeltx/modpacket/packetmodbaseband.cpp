@@ -33,13 +33,9 @@ PacketModBaseband::PacketModBaseband()
     m_channelizer = new UpChannelizer(&m_source);
 
     qDebug("PacketModBaseband::PacketModBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSourceFifo::dataRead,
-        this,
-        &PacketModBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }

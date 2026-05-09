@@ -35,9 +35,12 @@ ATVDemodSink::ATVDemodSink() :
     m_videoTabIndex(0),
     m_scopeSink(nullptr),
     m_registeredTVScreen(nullptr),
+    m_tvScreenBuffer(nullptr),
     m_numberSamplesPerHTop(0),
     m_fieldIndex(0),
     m_synchroSamples(0),
+    m_fieldDetectSampleCount(0),
+    m_vSyncDetectSampleCount(0),
     m_effMin(20.0f),
     m_effMax(-20.0f),
     m_ampMin(-1.0f),
@@ -48,9 +51,9 @@ ATVDemodSink::ATVDemodSink() :
 	m_sampleOffsetFrac(0.0f),
     m_sampleOffsetDetected(0),
     m_lineIndex(0),
-	m_hSyncShift(0.0f),
+    m_hSyncShift(0.0f),
     m_hSyncErrorCount(0),
-    m_ampAverage(4800),
+    m_prevSyncSample(0.0f),
     m_bfoPLL(200/1000000, 100/1000000, 0.01),
     m_bfoFilter(200.0, 1000000.0, 0.9),
     m_DSBFilter(nullptr),
@@ -61,6 +64,7 @@ ATVDemodSink::ATVDemodSink() :
     //*************** ATV PARAMETERS  ***************
     m_synchroSamples=0;
     m_interleaved = true;
+    m_firstFieldRowOffset = 0;
 
     m_DSBFilter = new fftfilt(m_settings.m_fftBandwidth / (float) m_channelSampleRate, 2*m_ssbFftLen); // arbitrary cutoff
     m_DSBFilterBuffer = new Complex[m_ssbFftLen];
@@ -78,6 +82,29 @@ ATVDemodSink::~ATVDemodSink()
 {
     delete m_DSBFilter;
     delete[] m_DSBFilterBuffer;
+}
+
+void ATVDemodSink::resetVideoState()
+{
+    m_fieldIndex = 0;
+    m_fieldDetectSampleCount = 0;
+    m_vSyncDetectSampleCount = 0;
+    m_effMin = 20.0f;
+    m_effMax = -20.0f;
+    m_ampMin = -1.0f;
+    m_ampMax = 1.0f;
+    m_ampDelta = 2.0f;
+    m_amSampleIndex = 0;
+    m_sampleOffset = 0;
+    m_sampleOffsetFrac = 0.0f;
+    m_sampleOffsetDetected = 0;
+    m_lineIndex = 0;
+    m_hSyncShift = 0.0f;
+    m_hSyncErrorCount = 0;
+    m_prevSyncSample = 0.0f;
+    std::fill(m_fltBufferI, m_fltBufferI + 6, 0.0f);
+    std::fill(m_fltBufferQ, m_fltBufferQ + 6, 0.0f);
+    m_magSqAverage.reset();
 }
 
 void ATVDemodSink::feed(const SampleVector::const_iterator& begin, const SampleVector::const_iterator& end)
@@ -146,8 +173,17 @@ void ATVDemodSink::demod(Complex& c)
         magSq = fltI*fltI + fltQ*fltQ;
         m_magSqAverage(magSq);
         sampleNorm = sqrt(magSq);
-        sampleNormI = fltI/sampleNorm;
-        sampleNormQ = fltQ/sampleNorm;
+
+        if (sampleNorm > 0.0f)
+        {
+            sampleNormI = fltI / sampleNorm;
+            sampleNormQ = fltQ / sampleNorm;
+        }
+        else
+        {
+            sampleNormI = 0.0f;
+            sampleNormQ = 0.0f;
+        }
 
         //-2 > 2 : 0 -> 1 volt
         //0->0.3 synchro  0.3->1 image
@@ -201,9 +237,7 @@ void ATVDemodSink::demod(Complex& c)
         magSq = fltI*fltI + fltQ*fltQ;
         m_magSqAverage(magSq);
         sampleNorm = sqrt(magSq);
-        float sampleRaw = sampleNorm / SDR_RX_SCALEF;
-        m_ampAverage(sampleRaw);
-        sample = sampleRaw / (2.0f * m_ampAverage.asFloat()); // AGC
+        sample = sampleNorm / SDR_RX_SCALEF;
     }
     else if ((m_settings.m_atvModulation == ATVDemodSettings::ATV_USB) || (m_settings.m_atvModulation == ATVDemodSettings::ATV_LSB))
     {
@@ -290,17 +324,17 @@ void ATVDemodSink::demod(Complex& c)
         sample /= m_ampDelta;
     }
 
-    sample = m_settings.m_invertVideo ? 1.0f - sample : sample;
-    // 0.0 -> 1.0
-    sample = (sample < 0.0f) ? 0.0f : (sample > 1.0f) ? 1.0f : sample;
+    // Keep sync detection on the native sync polarity even when the displayed video is inverted.
+    float syncSample = (sample < 0.0f) ? 0.0f : (sample > 1.0f) ? 1.0f : sample;
+    float displaySample = m_settings.m_invertVideo ? 1.0f - syncSample : syncSample;
 
     if ((m_videoTabIndex == 1) && (m_scopeSink != 0)) { // feed scope buffer only if scope is present and visible
-        m_scopeSampleBuffer.push_back(Sample(sample * (SDR_RX_SCALEF - 1.0f), 0.0f));
+        m_scopeSampleBuffer.push_back(Sample(displaySample * (SDR_RX_SCALEF - 1.0f), 0.0f));
     }
 
     //********** gray level **********
     // -0.3 -> 0.7 / 0.7
-    sampleVideo = (int) ((sample - m_settings.m_levelBlack) * m_sampleRangeCorrection);
+    sampleVideo = (int) ((displaySample - m_settings.m_levelBlack) * m_sampleRangeCorrection);
 
     // 0 -> 255
     sampleVideo = (sampleVideo < 0) ? 0 : (sampleVideo > 255) ? 255 : sampleVideo;
@@ -309,7 +343,7 @@ void ATVDemodSink::demod(Complex& c)
 
     if (m_registeredTVScreen) // can process only if the screen is available (set via the GUI)
     {
-        processSample(sample, sampleVideo);
+        processSample(syncSample, sampleVideo);
     }
 }
 
@@ -320,12 +354,14 @@ void ATVDemodSink::applyStandard(int sampleRate, ATVDemodSettings::ATVStd atvStd
     case ATVDemodSettings::ATVStdHSkip:
         // what is left in a line for the image
         m_interleaved        = false; // irrelevant
+        m_firstFieldRowOffset = 0;
         m_numberOfBlackLines = 0;
         m_numberSamplesHSyncCrop = (int) (0.09f * lineDuration * sampleRate); // 9% of full line empirically
         break;
     case ATVDemodSettings::ATVStdShort:
         // what is left in a line for the image
         m_interleaved        = false;
+        m_firstFieldRowOffset = 0;
         m_numberOfVSyncLines = 2;
         m_numberOfBlackLines = 4;
         m_firstVisibleLine   = 3;
@@ -334,6 +370,7 @@ void ATVDemodSink::applyStandard(int sampleRate, ATVDemodSettings::ATVStd atvStd
     case ATVDemodSettings::ATVStdShortInterleaved:
         // what is left in a line for the image
         m_interleaved        = true;
+        m_firstFieldRowOffset = 1;
         m_numberOfVSyncLines = 2;
         m_numberOfBlackLines = 5;
         m_firstVisibleLine   = 3;
@@ -342,6 +379,7 @@ void ATVDemodSink::applyStandard(int sampleRate, ATVDemodSettings::ATVStd atvStd
     case ATVDemodSettings::ATVStd819: // 819 lines standard F
         // what is left in a line for the image
         m_interleaved        = true;
+        m_firstFieldRowOffset = 0;
         m_numberOfVSyncLines = 4;
         m_numberOfBlackLines = 59;
         m_firstVisibleLine   = 27;
@@ -350,6 +388,7 @@ void ATVDemodSink::applyStandard(int sampleRate, ATVDemodSettings::ATVStd atvStd
     case ATVDemodSettings::ATVStdPAL525: // Follows PAL-M standard
         // what is left in a 64/1.008 us line for the image
         m_interleaved        = true;
+        m_firstFieldRowOffset = 1;
         m_numberOfVSyncLines = 4;
         m_numberOfBlackLines = 45;
         m_firstVisibleLine   = 20;
@@ -359,6 +398,7 @@ void ATVDemodSink::applyStandard(int sampleRate, ATVDemodSettings::ATVStd atvStd
     default:
         // what is left in a 64 us line for the image
         m_interleaved        = true;
+        m_firstFieldRowOffset = 0;
         m_numberOfVSyncLines = 3;
         m_numberOfBlackLines = 49;
         m_firstVisibleLine   = 23;
@@ -421,7 +461,9 @@ void ATVDemodSink::applyChannelSettings(int channelSampleRate, int channelFreque
         m_nco.setFreq(-channelFrequencyOffset, channelSampleRate);
     }
 
-    if ((channelSampleRate != m_channelSampleRate) || force)
+    const bool sampleRateChanged = (channelSampleRate != m_channelSampleRate) || force;
+
+    if (sampleRateChanged)
     {
         unsigned int samplesPerLineNom;
         ATVDemodSettings::getBaseValues(channelSampleRate, m_settings.m_nbLines * m_settings.m_fps, samplesPerLineNom);
@@ -458,8 +500,9 @@ void ATVDemodSink::applyChannelSettings(int channelSampleRate, int channelFreque
         );
 		m_tvScreenBuffer = m_registeredTVScreen->getBackBuffer();
     }
-
-    m_fieldIndex = 0;
+    if (sampleRateChanged) {
+        resetVideoState();
+    }
 
     m_channelSampleRate = channelSampleRate;
     m_channelFrequencyOffset = channelFrequencyOffset;
@@ -468,6 +511,20 @@ void ATVDemodSink::applyChannelSettings(int channelSampleRate, int channelFreque
 void ATVDemodSink::applySettings(const QStringList& settingsKeys, const ATVDemodSettings& settings, bool force)
 {
     qDebug() << "ATVDemodSink::applySettings:" << settings.getDebugString(settingsKeys, force);
+
+    const bool resetDemodState = force
+        || settingsKeys.contains("atvModulation")
+        || settingsKeys.contains("nbLines")
+        || settingsKeys.contains("fps")
+        || settingsKeys.contains("atvStd")
+        || settingsKeys.contains("hSync")
+        || settingsKeys.contains("vSync")
+        || settingsKeys.contains("levelSynchroTop")
+        || settingsKeys.contains("levelBlack")
+        || settingsKeys.contains("invertVideo")
+        || settingsKeys.contains("amScalingFactor")
+        || settingsKeys.contains("amOffsetFactor")
+        || settingsKeys.contains("fmDeviation");
 
     if (settingsKeys.contains("fftBandwidth") || settingsKeys.contains("fftOppBandwidth") || force)
     {
@@ -493,7 +550,6 @@ void ATVDemodSink::applySettings(const QStringList& settingsKeys, const ATVDemod
         ATVDemodSettings::getBaseValues(m_channelSampleRate, settings.m_nbLines * settings.m_fps, samplesPerLineNom);
         m_samplesPerLine = samplesPerLineNom;
 		m_samplesPerLineFrac = (float)m_channelSampleRate / (settings.m_nbLines * settings.m_fps) - m_samplesPerLine;
-		m_ampAverage.resize(m_samplesPerLine * settings.m_nbLines * 2); // AGC average in two full images
 
         qDebug() << "ATVDemodSink::applySettings:"
                 << " m_channelSampleRate: " << m_channelSampleRate
@@ -512,7 +568,6 @@ void ATVDemodSink::applySettings(const QStringList& settingsKeys, const ATVDemod
 			m_tvScreenBuffer = m_registeredTVScreen->getBackBuffer();
         }
 
-        m_fieldIndex = 0;
     }
 
     if (settingsKeys.contains("fmDeviation") || force) {
@@ -520,12 +575,16 @@ void ATVDemodSink::applySettings(const QStringList& settingsKeys, const ATVDemod
     }
 
     if (settingsKeys.contains("levelBlack") || force) {
-        m_sampleRangeCorrection = 255.0f / (1.0f - m_settings.m_levelBlack);
+        m_sampleRangeCorrection = 255.0f / (1.0f - settings.m_levelBlack);
     }
 
     if (force) {
         m_settings = settings;
     } else {
         m_settings.applySettings(settingsKeys, settings);
+    }
+
+    if (resetDemodState) {
+        resetVideoState();
     }
 }

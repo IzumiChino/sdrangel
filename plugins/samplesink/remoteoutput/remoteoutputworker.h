@@ -47,8 +47,8 @@ public:
 	RemoteOutputWorker(SampleSourceFifo* sampleFifo, QObject* parent = 0);
 	~RemoteOutputWorker();
 
-	void startWork();
-	void stopWork();
+    Q_INVOKABLE void startWork();
+    Q_INVOKABLE void stopWork();
 
     void setDeviceIndex(uint32_t deviceIndex) { m_udpSinkFEC.setDeviceIndex(deviceIndex); }
 	void setSamplerate(int samplerate);

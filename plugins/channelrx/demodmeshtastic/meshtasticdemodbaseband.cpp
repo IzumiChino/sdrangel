@@ -32,13 +32,9 @@ MeshtasticDemodBaseband::MeshtasticDemodBaseband() :
     m_sampleFifo.setSize(SampleSinkFifo::getSizePolicy(48000));
 
     qDebug("MeshtasticDemodBaseband::MeshtasticDemodBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &MeshtasticDemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }

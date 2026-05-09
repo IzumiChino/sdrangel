@@ -188,6 +188,43 @@ public:
         {}
     };
 
+    class MsgReportRemoteStatus : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const QString& getMessage() const { return m_message; }
+        bool usesDeviceReport() const { return m_usesDeviceReport; }
+        quint64 getCenterFrequency() const { return m_centerFrequency; }
+        int getSampleRate() const { return m_sampleRate; }
+
+        static MsgReportRemoteStatus* create(
+            const QString& message,
+            bool usesDeviceReport,
+            quint64 centerFrequency,
+            int sampleRate)
+        {
+            return new MsgReportRemoteStatus(message, usesDeviceReport, centerFrequency, sampleRate);
+        }
+
+    private:
+        QString m_message;
+        bool m_usesDeviceReport;
+        quint64 m_centerFrequency;
+        int m_sampleRate;
+
+        MsgReportRemoteStatus(
+            const QString& message,
+            bool usesDeviceReport,
+            quint64 centerFrequency,
+            int sampleRate) :
+            Message(),
+            m_message(message),
+            m_usesDeviceReport(usesDeviceReport),
+            m_centerFrequency(centerFrequency),
+            m_sampleRate(sampleRate)
+        {}
+    };
+
     class MsgRequestFixedData : public Message {
         MESSAGE_CLASS_DECLARATION
 
@@ -257,6 +294,12 @@ public:
         SWGSDRangel::SWGDeviceSettings& response);
 
 private:
+    enum class RemoteReportMode {
+        Unknown,
+        RemoteSource,
+        RemoteInput
+    };
+
     DeviceAPI *m_deviceAPI;
 	QRecursiveMutex m_mutex;
     bool m_running = false;
@@ -275,16 +318,25 @@ private:
     int m_queueSize = 0;
     int m_recoverableCount = 0;
     int m_unrecoverableCount = 0;
+    RemoteReportMode m_remoteReportMode = RemoteReportMode::Unknown;
 
     QNetworkAccessManager *m_networkManager;
     QNetworkRequest m_networkRequest;
 
     void startWorker();
     void stopWorker();
+    void setWorkerDataAddress(const QString& address, uint16_t port);
+    void setWorkerNbBlocksFEC(uint32_t nbBlocksFEC);
+    void setWorkerNbTxBytes(uint32_t nbTxBytes);
+    void setWorkerSampleRate(int sampleRate);
+    void setWorkerChunkCorrection(int chunkCorrection);
 	void applySettings(const RemoteOutputSettings& settings, const QList<QString>& settingsKeys, bool force = false);
     void applyCenterFrequency();
     void applySampleRate();
     void webapiFormatDeviceReport(SWGSDRangel::SWGDeviceReport& response) const;
+    void requestRemoteReport(RemoteReportMode mode);
+    void requestRemoteInputSettings();
+    void reportRemoteStatus(const QString& message, bool usesDeviceReport, quint64 centerFrequency, int sampleRate);
 
     void analyzeApiReply(const QJsonObject& jsonObject, const QString& answer);
     void queueLengthCompensation(

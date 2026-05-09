@@ -65,13 +65,9 @@ void FileSinkBaseband::startWork()
         &FileSinkBaseband::tick
     );
     m_timer->start(200);
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &FileSinkBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
     QObject::connect(
         &m_inputMessageQueue,
         &MessageQueue::messageEnqueued,
@@ -92,12 +88,7 @@ void FileSinkBaseband::stopWork()
         this,
         &FileSinkBaseband::handleInputMessages
     );
-    QObject::disconnect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &FileSinkBaseband::handleData
-    );
+    m_sampleFifo.setDataReadyCallback({});
     delete m_timer;
 }
 

@@ -19,6 +19,7 @@
 
 #include <QTime>
 #include <QDebug>
+#include <QMetaObject>
 
 #include <stdio.h>
 #include <complex.h>
@@ -98,8 +99,8 @@ void ATVDemod::start()
 	qDebug("ATVDemod::start");
 
     m_basebandSink->reset();
-    m_basebandSink->startWork();
     m_thread.start();
+    QMetaObject::invokeMethod(m_basebandSink, [this]() { m_basebandSink->startWork(); }, Qt::BlockingQueuedConnection);
 
     // re-apply essential messages
 
@@ -113,7 +114,7 @@ void ATVDemod::start()
 void ATVDemod::stop()
 {
     qDebug("ATVDemod::stop");
-    m_basebandSink->stopWork();
+    QMetaObject::invokeMethod(m_basebandSink, [this]() { m_basebandSink->stopWork(); }, Qt::BlockingQueuedConnection);
 	m_thread.exit();
 	m_thread.wait();
 }

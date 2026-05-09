@@ -19,21 +19,24 @@
 #ifndef INCLUDE_SAMPLEMIFIFO_H
 #define INCLUDE_SAMPLEMIFIFO_H
 
-#include <QObject>
-#include <QRecursiveMutex>
+#include <functional>
+#include <mutex>
 #include <vector>
+
+#include <QtGlobal>
+
 #include "dsp/dsptypes.h"
 #include "export.h"
 
-class SDRBASE_API SampleMIFifo : public QObject {
-	Q_OBJECT
-
+class SDRBASE_API SampleMIFifo {
 public:
-    SampleMIFifo(QObject *parent = nullptr);
-    SampleMIFifo(unsigned int nbStreams, unsigned int size, QObject *parent = nullptr);
+    SampleMIFifo();
+    SampleMIFifo(unsigned int nbStreams, unsigned int size);
     ~SampleMIFifo();
     void init(unsigned int nbStreams, unsigned int size);
     void reset();
+    void setDataSyncReadyCallback(std::function<void()> callback) { m_dataSyncReadyCallback = std::move(callback); }
+    void setDataAsyncReadyCallback(std::function<void(int)> callback) { m_dataAsyncReadyCallback = std::move(callback); }
 
     void writeSync(const quint8* data, unsigned int count); //!< de-interleaved data in input with count bytes for each stream
     void writeSync(const std::vector<SampleVector::const_iterator>& vbegin, unsigned int size);
@@ -68,7 +71,7 @@ public:
 
     inline unsigned int fillSync()
     {
-        QMutexLocker mutexLocker(&m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         unsigned int fill = m_head <= m_fill ? m_fill - m_head : m_size - (m_head - m_fill);
         return fill;
     }
@@ -79,14 +82,10 @@ public:
             return 0;
         }
 
-        QMutexLocker mutexLocker(&m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         unsigned int fill = m_vHead[stream] <= m_vFill[stream] ? m_vFill[stream] - m_vHead[stream] : m_size - (m_vHead[stream] - m_vFill[stream]);
         return fill;
     }
-
-signals:
-	void dataSyncReady();
-    void dataAsyncReady(int streamIndex);
 
 private:
     std::vector<SampleVector> m_data;
@@ -96,7 +95,9 @@ private:
     unsigned int m_head;               //!< Number of samples read from beginning of samples vector (sync)
     std::vector<unsigned int> m_vFill; //!< Number of samples written from beginning of samples vector (async)
     std::vector<unsigned int> m_vHead; //!< Number of samples read from beginning of samples vector (async)
-	QRecursiveMutex m_mutex;
+	std::function<void()> m_dataSyncReadyCallback;
+    std::function<void(int)> m_dataAsyncReadyCallback;
+	std::recursive_mutex m_mutex;
 };
 
 #endif // INCLUDE_SAMPLEMIFIFO_H

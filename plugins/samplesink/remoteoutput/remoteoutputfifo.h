@@ -20,28 +20,24 @@
 #ifndef REMOTESINK_REMOTEOUTPUTFIFO_H_
 #define REMOTESINK_REMOTEOUTPUTFIFO_H_
 
+#include <functional>
+#include <mutex>
 #include <vector>
-
-#include <QObject>
-#include <QMutex>
 
 #include "channel/remotedatablock.h"
 
-class RemoteOutputFifo : public QObject {
-    Q_OBJECT
+class RemoteOutputFifo {
 public:
-    RemoteOutputFifo(QObject *parent = nullptr);
-    RemoteOutputFifo(unsigned int size, QObject *parent = nullptr);
+    RemoteOutputFifo();
+    explicit RemoteOutputFifo(unsigned int size);
     ~RemoteOutputFifo();
     void resize(unsigned int size);
     void reset();
+    void setDataBlockServedCallback(std::function<void()> callback) { m_dataBlockServedCallback = std::move(callback); }
 
     RemoteDataFrame *getDataFrame();
     unsigned int readDataFrame(RemoteDataFrame **dataFrame);
     unsigned int getRemainder();
-
-signals:
-    void dataBlockServed();
 
 private:
     std::vector<RemoteDataFrame> m_data;
@@ -49,7 +45,8 @@ private:
     int m_readHead;   //!< index of last data block processed
     int m_servedHead; //!< index of last data block served
     int m_writeHead;  //!< index of next data block to serve
-    QMutex m_mutex;
+    std::function<void()> m_dataBlockServedCallback;
+    std::mutex m_mutex;
 
     unsigned int calculateRemainder();
 };

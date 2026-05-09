@@ -34,13 +34,9 @@ IEEE_802_15_4_ModBaseband::IEEE_802_15_4_ModBaseband()
     m_source.setScopeSink(&m_scopeSink);
 
     qDebug("IEEE_802_15_4_ModBaseband::IEEE_802_15_4_ModBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSourceFifo::dataRead,
-        this,
-        &IEEE_802_15_4_ModBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }

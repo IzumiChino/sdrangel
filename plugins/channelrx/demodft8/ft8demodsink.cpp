@@ -188,7 +188,7 @@ void FT8DemodSink::processOneSample(Complex &ci)
 
                 for (; it != dataPipes.end(); ++it)
                 {
-                    DataFifo *fifo = qobject_cast<DataFifo*>((*it)->m_element);
+                    DataFifo *fifo = getDataFifoFromPipeElement((*it)->m_element);
 
                     if (fifo)
                     {

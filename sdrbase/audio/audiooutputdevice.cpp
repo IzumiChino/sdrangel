@@ -395,7 +395,7 @@ qint64 AudioOutputDevice::readData(char* data, qint64 maxLen)
         if (samples != samplesPerBuffer)
         {
             //qDebug("AudioOutputDevice::readData: read %d samples vs %d requested", samples, samplesPerBuffer);
-            emit (*it)->underflow();
+            (*it)->notifyUnderflow();
         }
 
 		for (unsigned int i = 0; i < samples; i++)

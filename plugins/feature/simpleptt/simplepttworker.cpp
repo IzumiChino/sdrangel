@@ -151,12 +151,14 @@ void SimplePTTWorker::applySettings(const SimplePTTSettings& settings, const QLi
 
         if (settings.m_vox)
         {
-            connect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleAudio(); }, Qt::AutoConnection);
+            });
             audioDeviceManager->addAudioSource(&m_audioFifo, getInputMessageQueue(), audioDeviceIndex);
         }
         else
         {
-            disconnect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback({});
             audioDeviceManager->removeAudioSource(&m_audioFifo);
         }
     }

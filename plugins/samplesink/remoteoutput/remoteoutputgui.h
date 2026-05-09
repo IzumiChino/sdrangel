@@ -97,6 +97,7 @@ private:
     bool m_doApplySettings;
     bool m_forceSettings;
     bool m_remoteAPIConnected;
+    bool m_remoteUsesDeviceReport;
 
     uint32_t m_countUnrecoverable;
     uint32_t m_countRecovered;
@@ -117,9 +118,12 @@ private:
 	void displayTime();
     void displayRemoteData(const RemoteOutput::MsgReportRemoteData::RemoteData& remoteData);
     void displayRemoteFixedData(const RemoteOutput::MsgReportRemoteFixedData::RemoteData& remoteData);
+    void setChannelIndexEnabled(bool enabled);
     void sendControl(bool force = false);
 	void sendSettings();
 	void updateSampleRate();
+    void displayManualSampleRate(quint32 sampleRate, int preferredUnitIndex = -1);
+    bool applyManualSampleRateSetting();
 	void displayEventCounts();
 	void displayEventStatus(int recoverableCount, int unrecoverableCount);
     void displayEventTimer();
@@ -132,6 +136,8 @@ private slots:
     void on_deviceIndex_returnPressed();
     void on_channelIndex_returnPressed();
     void on_nbTxBytes_currentIndexChanged(int index);
+    void on_manualSampleRateOverride_toggled(bool checked);
+    void on_manualSampleRate_returnPressed();
     void on_apiAddress_returnPressed();
     void on_apiPort_returnPressed();
     void on_dataAddress_returnPressed();

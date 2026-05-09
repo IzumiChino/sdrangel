@@ -21,66 +21,51 @@
 #ifndef SDRBASE_DSP_SAMPLESOURCEFIFO_H_
 #define SDRBASE_DSP_SAMPLESOURCEFIFO_H_
 
-#include <QObject>
-#include <QMutex>
-#include "dsp/dsptypes.h"
+#include <functional>
+
+#include "samplefifocore.h"
 #include "export.h"
 
-class SDRBASE_API SampleSourceFifo : public QObject {
-	Q_OBJECT
+class SDRBASE_API SampleSourceFifo {
 public:
-    SampleSourceFifo(QObject *parent = nullptr);
-    SampleSourceFifo(unsigned int size, QObject *parent = nullptr);
+    SampleSourceFifo();
+    explicit SampleSourceFifo(unsigned int size);
     ~SampleSourceFifo();
     void resize(unsigned int size);
     void reset();
+    void setDataReadCallback(std::function<void()> callback) { m_dataReadCallback = std::move(callback); }
 
-    SampleVector& getData() { return m_data; }
+    SampleVector& getData() { return m_core.data(); }
     void read(
         unsigned int amount,
-		unsigned int& ipart1Begin, unsigned int& ipart1End, // first part offsets where to read
-		unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
+		unsigned int& ipart1Begin, unsigned int& ipart1End,
+		unsigned int& ipart2Begin, unsigned int& ipart2End
     );
-    void write( //!< in place write
+    void write(
         unsigned int amount,
-		unsigned int& ipart1Begin, unsigned int& ipart1End, // first part offsets where to write
-		unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
+		unsigned int& ipart1Begin, unsigned int& ipart1End,
+		unsigned int& ipart2Begin, unsigned int& ipart2End
     );
     unsigned int remainder()
     {
-        QMutexLocker mutexLocker(&m_mutex);
-        return m_readCount;
+        return m_core.remainder();
     }
-    /** returns ratio of off center over buffer size with sign: negative read lags and positive read leads */
+    /** returns ratio of off-centre over buffer size with sign: negative=read lags, positive=read leads */
     float getRWBalance() const
     {
-        int delta;
-        if (m_writeHead > m_readHead) {
-            delta = (m_size/m_rwDivisor) - (m_writeHead - m_readHead);
-        } else {
-            delta = (m_readHead - m_writeHead) - (m_size/m_rwDivisor);
-        }
-        return delta / (float) m_size;
+        return m_core.getRWBalance();
     }
-    unsigned int size() const { return m_size; }
+    unsigned int size() const {
+        return m_core.size();
+    }
 
     static unsigned int getSizePolicy(unsigned int sampleRate);
     static const unsigned int m_rwDivisor;
     static const unsigned int m_guardDivisor;
 
-signals:
-    void dataRead();
-
 private:
-    SampleVector m_data;
-    unsigned int m_size;
-    unsigned int m_lowGuard;
-    unsigned int m_highGuard;
-    unsigned int m_midPoint;
-    unsigned int m_readHead;
-    unsigned int m_writeHead;
-    unsigned int m_readCount;
-    QMutex m_mutex;
+    SampleSourceFifoCore m_core;
+    std::function<void()> m_dataReadCallback;
 };
 
 #endif // SDRBASE_DSP_SAMPLESOURCEFIFO_H_

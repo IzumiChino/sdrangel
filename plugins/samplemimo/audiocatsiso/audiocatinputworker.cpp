@@ -42,13 +42,15 @@ AudioCATInputWorker::~AudioCATInputWorker()
 
 void AudioCATInputWorker::startWork()
 {
-    connect(m_fifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+    m_fifo->setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleAudio(); }, Qt::AutoConnection);
+    });
     m_running = true;
 }
 
 void AudioCATInputWorker::stopWork()
 {
-    disconnect(m_fifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+    m_fifo->setDataReadyCallback({});
     m_running = false;
 }
 

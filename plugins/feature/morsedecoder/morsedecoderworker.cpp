@@ -286,22 +286,13 @@ bool MorseDecoderWorker::handleMessage(const Message& cmd)
         qDebug("MorseDecoderWorker::handleMessage: MsgConnectFifo: %s", (doConnect ? "connect" : "disconnect"));
 
         if (doConnect) {
-            QObject::connect(
-                m_dataFifo,
-                &DataFifo::dataReady,
-                this,
-                &MorseDecoderWorker::handleData,
-                Qt::QueuedConnection
-            );
+            m_dataFifo->setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+            });
         }
         else
         {
-            QObject::disconnect(
-                m_dataFifo,
-                &DataFifo::dataReady,
-                this,
-                &MorseDecoderWorker::handleData
-            );
+            m_dataFifo->setDataReadyCallback({});
         }
 
         return true;

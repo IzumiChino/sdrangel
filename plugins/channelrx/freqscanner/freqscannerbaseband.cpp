@@ -36,13 +36,9 @@ FreqScannerBaseband::FreqScannerBaseband(FreqScanner *freqScanner) :
 
     m_sampleFifo.setSize(SampleSinkFifo::getSizePolicy(48000));
 
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &FreqScannerBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     m_channelizer = new DownChannelizer(&m_sink);
     m_channelSampleRate = 0;

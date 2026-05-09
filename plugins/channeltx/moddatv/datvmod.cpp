@@ -104,7 +104,7 @@ void DATVMod::setDeviceAPI(DeviceAPI *deviceAPI)
         m_deviceAPI->removeChannelSource(this, false);
         m_deviceAPI = deviceAPI;
         m_deviceAPI->addChannelSource(this);
-        m_deviceAPI->addChannelSinkAPI(this);
+        m_deviceAPI->addChannelSourceAPI(this);
     }
 }
 
