@@ -51,7 +51,7 @@ void DATVDemodSettings::resetToDefaults()
     m_notchFilters = 0;
     m_allowDrift = false;
     m_fastLock = false;
-    m_filter = SAMP_LINEAR;
+    m_filter = SAMP_RRC;
     m_hardMetric = false;
     m_rollOff = 0.35;
     m_viterbi = false;
@@ -174,7 +174,7 @@ bool DATVDemodSettings::deserialize(const QByteArray& data)
         d.readBool(13, &m_allowDrift, false);
         d.readBool(14, &m_fastLock, false);
 
-        d.readS32(15, &tmp, (int) SAMP_LINEAR);
+        d.readS32(15, &tmp, (int) SAMP_RRC);
         tmp = tmp < 0 ? 0 : tmp > (int) SAMP_RRC ? (int) SAMP_RRC : tmp;
         m_filter = (dvb_sampler) tmp;
 

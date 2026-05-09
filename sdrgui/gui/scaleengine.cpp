@@ -20,10 +20,16 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <math.h>
+#include <algorithm>
+#include <cmath>
 #include <QObject>
 #include <QFontMetrics>
 #include <QDataStream>
 #include "gui/scaleengine.h"
+
+namespace {
+constexpr int kMaxTickDecimalPlaces = 9;
+}
 
 /*
 static double trunc(double d)
@@ -270,7 +276,7 @@ double ScaleEngine::calcMajorTickUnits(double distance, int* retDecimalPlaces)
 	double base;
 	int decimalPlaces;
 
-	if(distance == 0.0)
+	if ((distance == 0.0) || !std::isfinite(distance))
 		return 0.0;
 
 	sign = (distance > 0.0) ? 1.0 : -1.0;
@@ -342,6 +348,8 @@ double ScaleEngine::calcMajorTickUnits(double distance, int* retDecimalPlaces)
 	if(retDecimalPlaces != 0) {
 		if(decimalPlaces < 0)
 			decimalPlaces = 0;
+		else if (decimalPlaces > kMaxTickDecimalPlaces)
+			decimalPlaces = kMaxTickDecimalPlaces;
 		*retDecimalPlaces = decimalPlaces;
 	}
 
@@ -447,9 +455,16 @@ void ScaleEngine::reCalcStd()
 	rangeMinScaled = rangeMin / m_scale;
 	rangeMaxScaled = rangeMax / m_scale;
 
+	if (!std::isfinite(rangeMinScaled) || !std::isfinite(rangeMaxScaled) || !std::isfinite(m_scale) || (m_scale == 0.0))
+	{
+		forceTwoTicks();
+		return;
+	}
+
 	if (m_orientation == Qt::Vertical)
 	{
 		maxNumMajorTicks = (int)(m_size / (fontMetrics.lineSpacing() * 1.3f));
+		maxNumMajorTicks = std::max(maxNumMajorTicks, 1);
 		m_majorTickValueDistance = calcMajorTickUnits((rangeMaxScaled - rangeMinScaled) / maxNumMajorTicks, &m_decimalPlaces);
 	}
 	else
@@ -462,7 +477,15 @@ void ScaleEngine::reCalcStd()
             maxNumMajorTicks = 20;
 		}
 
+		maxNumMajorTicks = std::max(maxNumMajorTicks, 1);
+
 		m_majorTickValueDistance = calcMajorTickUnits((rangeMaxScaled - rangeMinScaled) / maxNumMajorTicks, &m_decimalPlaces);
+	}
+
+	if (!std::isfinite(m_majorTickValueDistance) || (m_majorTickValueDistance == 0.0))
+	{
+		forceTwoTicks();
+		return;
 	}
 
 	numMajorTicks = (int)((rangeMaxScaled - rangeMinScaled) / m_majorTickValueDistance);
@@ -631,9 +654,16 @@ void ScaleEngine::reCalcS()
 	rangeMinScaled = rangeMin / m_scale;
 	rangeMaxScaled = rangeMax / m_scale;
 
+	if (!std::isfinite(rangeMinScaled) || !std::isfinite(rangeMaxScaled) || !std::isfinite(m_scale) || (m_scale == 0.0))
+	{
+		forceTwoTicks();
+		return;
+	}
+
 	if (m_orientation == Qt::Vertical)
 	{
 		maxNumMajorTicks = (int)(m_size / (fontMetrics.lineSpacing() * 1.3f));
+		maxNumMajorTicks = std::max(maxNumMajorTicks, 1);
 		m_majorTickValueDistance = calcMajorTickUnits((rangeMaxScaled - rangeMinScaled) / maxNumMajorTicks, &m_decimalPlaces);
 	}
 	else
@@ -646,7 +676,15 @@ void ScaleEngine::reCalcS()
             maxNumMajorTicks = 20;
 		}
 
+		maxNumMajorTicks = std::max(maxNumMajorTicks, 1);
+
 		m_majorTickValueDistance = calcMajorTickUnits((rangeMaxScaled - rangeMinScaled) / maxNumMajorTicks, &m_decimalPlaces);
+	}
+
+	if (!std::isfinite(m_majorTickValueDistance) || (m_majorTickValueDistance == 0.0))
+	{
+		forceTwoTicks();
+		return;
 	}
 
 	numMajorTicks = (int)((rangeMaxScaled - rangeMinScaled) / m_majorTickValueDistance);
@@ -912,6 +950,23 @@ void ScaleEngine::setRange(Unit::Physical physicalUnit, float rangeMin, float ra
 	tmpRangeMin = rangeMin;
 	tmpRangeMax = rangeMax;
 
+	if (!std::isfinite(tmpRangeMin) || !std::isfinite(tmpRangeMax))
+	{
+		tmpRangeMin = -1.0;
+		tmpRangeMax = 1.0;
+	}
+
+	if (tmpRangeMin > tmpRangeMax) {
+		std::swap(tmpRangeMin, tmpRangeMax);
+	}
+
+	if (tmpRangeMin == tmpRangeMax)
+	{
+		double delta = (tmpRangeMin == 0.0) ? 1.0 : std::fabs(tmpRangeMin) * 0.01;
+		tmpRangeMin -= delta;
+		tmpRangeMax += delta;
+	}
+
 	if ((tmpRangeMin != m_rangeMin) || (tmpRangeMax != m_rangeMax) || (m_physicalUnit != physicalUnit))
     {
 		m_physicalUnit = physicalUnit;
@@ -994,7 +1049,6 @@ void ScaleEngine::setTruncateMode(bool mode)
     qDebug("ScaleEngine::setTruncateMode: %s", (mode ? "on" : "off"));
     m_truncateMode = mode;
     m_recalc = true;
-    reCalc();
 }
 
 void ScaleEngine::updateTruncation()

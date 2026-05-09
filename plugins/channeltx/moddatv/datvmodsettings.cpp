@@ -83,6 +83,7 @@ QByteArray DATVModSettings::serialize() const
     s.writeBool(12, m_tsFilePlayLoop);
     s.writeString(13, m_udpAddress);
     s.writeU32(14, m_udpPort);
+    s.writeBool(15, m_channelMute);
     s.writeString(20, m_title);
     s.writeU32(21, m_rgbColor);
 
@@ -148,6 +149,8 @@ bool DATVModSettings::deserialize(const QByteArray& data)
         } else {
             m_udpPort = 5004;
         }
+
+        d.readBool(15, &m_channelMute, false);
 
         d.readString(20, &m_title, "DATV Modulator");
         d.readU32(21, &m_rgbColor, QColor(Qt::magenta).rgb());

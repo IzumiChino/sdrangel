@@ -31,6 +31,27 @@
 #include "atvmodreport.h"
 #include "atvmodsource.h"
 
+namespace {
+
+void convertFrameToGray(const cv::Mat& colorFrame, cv::Mat& grayFrame)
+{
+    switch (colorFrame.channels())
+    {
+    case 1:
+        colorFrame.copyTo(grayFrame);
+        break;
+    case 4:
+        cv::cvtColor(colorFrame, grayFrame, cv::COLOR_BGRA2GRAY);
+        break;
+    case 3:
+    default:
+        cv::cvtColor(colorFrame, grayFrame, cv::COLOR_BGR2GRAY);
+        break;
+    }
+}
+
+}
+
 const float ATVModSource::m_blackLevel = 0.3f;
 const float ATVModSource::m_spanLevel = 0.7f;
 const int ATVModSource::m_levelNbSamples = 10000; // every 10ms
@@ -401,7 +422,7 @@ void ATVModSource::pullVideo(Real& sample)
             		        mixImageAndText(colorFrame);
             		    }
 
-            		    cv::cvtColor(colorFrame, m_videoframeOriginal, cv::COLOR_RGB2GRAY);
+                        convertFrameToGray(colorFrame, m_videoframeOriginal);
             		    resizeVideo();
             		}
             	}
@@ -461,8 +482,12 @@ void ATVModSource::pullVideo(Real& sample)
                     time(&end);
 
                     double seconds = difftime (end, start);
-                    // take a 10% guard and divide bandwidth between all cameras as a hideous hack
-                    camera.m_videoFPS = ((nbFrames / seconds) * 0.9) / m_cameras.size();
+
+                    if (seconds <= 0.0) {
+                        seconds = 1.0;
+                    }
+
+                    camera.m_videoFPS = (nbFrames / seconds) * 0.9;
                     camera.m_videoFPSq = camera.m_videoFPS / m_fps;
                     camera.m_videoFPSCount = camera.m_videoFPSq;
                     camera.m_videoPrevFPSCount = 0;
@@ -528,7 +553,7 @@ void ATVModSource::pullVideo(Real& sample)
                         mixImageAndText(colorFrame);
                     }
 
-                    cv::cvtColor(colorFrame, camera.m_videoframeOriginal, cv::COLOR_RGB2GRAY);
+                    convertFrameToGray(colorFrame, camera.m_videoframeOriginal);
                     resizeCamera();
                 }
 

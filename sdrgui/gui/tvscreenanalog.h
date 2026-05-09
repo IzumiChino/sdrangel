@@ -52,6 +52,7 @@ public:
 
 		std::fill(m_imageData, m_imageData + width * height, 0);
 		std::fill(m_lineShiftData, m_lineShiftData + height, 127);
+		std::fill(m_outOfBoundsLine, m_outOfBoundsLine + width, 0);
 	}
 
 	~TVScreenAnalogBuffer()
@@ -81,12 +82,21 @@ public:
 		return m_lineShiftData;
 	}
 
+	void clear()
+	{
+		std::fill(m_imageData, m_imageData + m_width * m_height, 0);
+		std::fill(m_lineShiftData, m_lineShiftData + m_height, 127);
+		std::fill(m_outOfBoundsLine, m_outOfBoundsLine + m_width, 0);
+		m_currentLine = m_outOfBoundsLine;
+	}
+
 	void selectRow(int line, float shift)
 	{
 		if ((line < m_height) && (line >= 0))
 		{
 			m_currentLine = m_imageData + line * m_width;
-			m_lineShiftData[line] = (1.0f + shift) * 127.5f;
+			std::fill(m_currentLine, m_currentLine + m_width, 0);
+			m_lineShiftData[line] = std::clamp(static_cast<int>((1.0f + shift) * 127.5f), 0, 255);
 		}
 		else
 		{

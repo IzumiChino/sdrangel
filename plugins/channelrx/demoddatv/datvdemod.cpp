@@ -20,6 +20,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QDebug>
+#include <QMetaObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QBuffer>
@@ -91,7 +92,7 @@ DATVDemod::~DATVDemod()
         stop();
     }
 
-    m_basebandSink->deleteLater();
+    delete m_basebandSink;
 }
 
 void DATVDemod::setDeviceAPI(DeviceAPI *deviceAPI)
@@ -117,8 +118,14 @@ void DATVDemod::start()
 	qDebug("DATVDemod::start");
 
     m_basebandSink->reset();
-    m_basebandSink->startWork();
     m_thread.start();
+    QMetaObject::invokeMethod(m_basebandSink, [this]() { m_basebandSink->startWork(); }, Qt::BlockingQueuedConnection);
+
+    if (m_basebandSampleRate != 0)
+    {
+        DSPSignalNotification* notifToSink = new DSPSignalNotification(m_basebandSampleRate, 0);
+        m_basebandSink->getInputMessageQueue()->push(notifToSink);
+    }
 
     DSPSignalNotification *dspMsg = new DSPSignalNotification(m_basebandSampleRate, m_centerFrequency);
     m_basebandSink->getInputMessageQueue()->push(dspMsg);
@@ -130,7 +137,7 @@ void DATVDemod::start()
 void DATVDemod::stop()
 {
     qDebug("DATVDemod::stop");
-	m_basebandSink->stopWork();
+    QMetaObject::invokeMethod(m_basebandSink, [this]() { m_basebandSink->stopWork(); }, Qt::BlockingQueuedConnection);
 	m_thread.quit();
 	m_thread.wait();
 }
@@ -221,6 +228,28 @@ void DATVDemod::applySettings(const QList<QString>& settingsKeys, const DATVDemo
     }
 
     m_settings = settings;
+}
+
+QByteArray DATVDemod::serialize() const
+{
+    return m_settings.serialize();
+}
+
+bool DATVDemod::deserialize(const QByteArray& data)
+{
+    if (m_settings.deserialize(data))
+    {
+        MsgConfigureDATVDemod *msg = MsgConfigureDATVDemod::create(QList<QString>(), m_settings, true);
+        m_inputMessageQueue.push(msg);
+        return true;
+    }
+    else
+    {
+        m_settings.resetToDefaults();
+        MsgConfigureDATVDemod *msg = MsgConfigureDATVDemod::create(QList<QString>(), m_settings, true);
+        m_inputMessageQueue.push(msg);
+        return false;
+    }
 }
 
 uint32_t DATVDemod::getNumberOfDeviceStreams() const
@@ -553,7 +582,7 @@ void DATVDemod::webapiFormatChannelSettings(
     if (channelSettingsKeys.contains("rfBandwidth") || force) {
         swgDATVDemodSettings->setRfBandwidth(settings.m_rfBandwidth);
     }
-    if (channelSettingsKeys.contains("inputFrequencyOffset") || force) {
+    if (channelSettingsKeys.contains("centerFrequency") || force) {
         swgDATVDemodSettings->setCenterFrequency(settings.m_centerFrequency);
     }
     if (channelSettingsKeys.contains("standard") || force) {
@@ -602,7 +631,7 @@ void DATVDemod::webapiFormatChannelSettings(
         swgDATVDemodSettings->setRollOff(settings.m_rollOff);
     }
     if (channelSettingsKeys.contains("viterbi") || force) {
-        swgDATVDemodSettings->setHardMetric(settings.m_viterbi ? 1 : 0);
+        swgDATVDemodSettings->setViterbi(settings.m_viterbi ? 1 : 0);
     }
     if (channelSettingsKeys.contains("excursion") || force) {
         swgDATVDemodSettings->setExcursion(settings.m_excursion);

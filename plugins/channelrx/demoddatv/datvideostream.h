@@ -26,6 +26,7 @@
 #include <QEventLoop>
 #include <QMutex>
 #include <QThread>
+#include <QWaitCondition>
 
 class DATVideostream : public QIODevice
 {
@@ -39,7 +40,7 @@ public:
     void resetTotalReceived();
     void cleanUp();
     void setMultiThreaded(bool multiThreaded);
-    void setThreadTimeout(int timeOut) { m_threadTimeout = timeOut; }
+    void setThreadTimeout(int timeOut);
 
     virtual bool isSequential() const;
     virtual qint64 bytesAvailable() const;
@@ -64,9 +65,9 @@ private:
     int m_threadTimeout;
 
     QEventLoop m_eventLoop;
-    QMutex m_mutex;
+    QWaitCondition m_dataWaitCondition;
+    mutable QMutex m_mutex;
     int m_memoryLimit;
-    int m_bytesAvailable;
     int m_bytesWaiting;
     int m_percentBuffer;
     qint64 m_totalReceived;

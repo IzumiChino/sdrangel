@@ -118,6 +118,7 @@ bool DATVDemodSink::audioActive()
     } else {
         return false;
     }
+        return true;
 #else
     return false;
 #endif
@@ -199,6 +200,7 @@ bool DATVDemodSink::playVideo()
         m_videoStream->setMultiThreaded(true);
         m_videoStream->setThreadTimeout(DATVideoRenderThread::videoThreadTimeoutMs);
         m_videoThread->start();
+        return true;
     }
 #endif
     return false;
@@ -252,7 +254,7 @@ void DATVDemodSink::CleanUpDATVFramework()
         delete p_resampled;
     }
     if (coeffs != nullptr) {
-        delete coeffs;
+        delete[] coeffs;
     }
 
     // OUTPUT PREPROCESSED DATA
@@ -260,7 +262,7 @@ void DATVDemodSink::CleanUpDATVFramework()
         delete sampler;
     }
     if (coeffs_sampler != nullptr) {
-        delete coeffs_sampler;
+        delete[] coeffs_sampler;
     }
     if (p_symbols != nullptr) {
         delete p_symbols;

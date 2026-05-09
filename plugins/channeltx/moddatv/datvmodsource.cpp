@@ -207,6 +207,14 @@ void DATVModSource::checkBitrates()
     int dataBitrate = getDVBSDataBitrate(m_settings);
     qDebug() << "MPEG-TS bitrate: " << m_mpegTSBitrate;
     qDebug() << "DVB data bitrate: " << dataBitrate;
+
+    if (dataBitrate <= 0)
+    {
+        qWarning() << "DATVModSource::checkBitrates: invalid DVB data bitrate" << dataBitrate;
+        m_tsRatio = 0.0f;
+        return;
+    }
+
     if (dataBitrate < m_mpegTSBitrate)
         qWarning() << "DVB data bitrate is lower than the bitrate of the MPEG transport stream";
     m_tsRatio = m_mpegTSBitrate/(float)dataBitrate;
@@ -350,6 +358,14 @@ void DATVModSource::modulateSample()
                 QByteArray ba = datagram.data();
                 int size = ba.size();
                 char *data = ba.data();
+
+                if (size < (int) sizeof(m_mpegTS))
+                {
+                    qWarning() << "DATVModSource::modulateSample: UDP packet size (" << size << ") is smaller than transport packet size " << sizeof(m_mpegTS);
+                    m_udpByteCount += ba.size();
+                    m_udpAbsByteCount += ba.size();
+                    continue;
+                }
 
                 if (size <= (int)sizeof(m_udpBuffer))
                 {

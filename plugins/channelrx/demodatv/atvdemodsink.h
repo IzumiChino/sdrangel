@@ -133,6 +133,7 @@ private:
     int m_numberSamplesPerHSync;       //!< number of samples per horizontal synchronization pattern (pulse + back porch)
     int m_numberSamplesHSyncCrop;      //!< number of samples to crop from start of horizontal synchronization
     bool m_interleaved;                //!< interleaved image
+    int m_firstFieldRowOffset;
 
     //*************** PROCESSING  ***************
 
@@ -159,10 +160,10 @@ private:
     int m_sampleOffsetDetected; // detected sample offset from the start of horizontal sync pulse
     int m_lineIndex;
 
-	float m_hSyncShift;
+    float m_hSyncShift;
     int m_hSyncErrorCount;
 
-    float prevSample;
+    float m_prevSyncSample;
 
     SampleVector m_sampleBuffer;
 
@@ -171,7 +172,6 @@ private:
     //*************** RF  ***************
 
     MovingAverageUtil<double, double, 32> m_magSqAverage;
-    MovingAverageUtilVar<double, double> m_ampAverage;
 
     NCO m_nco;
     SimplePhaseLock m_bfoPLL;
@@ -188,8 +188,9 @@ private:
 
     void demod(Complex& c);
     void applyStandard(int sampleRate, ATVDemodSettings::ATVStd atvStd, float lineDuration);
+    void resetVideoState();
 
-    inline void processSample(float& sample, int& sampleVideo)
+    inline void processSample(float syncSample, int sampleVideo)
     {
         // Filling pixel on the current line - reference index 0 at start of sync pulse
 		m_tvScreenBuffer->setSampleValue(m_sampleOffset - m_numberSamplesPerHSync, sampleVideo);
@@ -197,12 +198,12 @@ private:
         if (m_settings.m_hSync)
         {
             // Horizontal Synchro detection
-            if ((prevSample >= m_settings.m_levelSynchroTop &&
-                sample < m_settings.m_levelSynchroTop) // horizontal synchro detected
+            if ((m_prevSyncSample >= m_settings.m_levelSynchroTop &&
+                syncSample < m_settings.m_levelSynchroTop) // horizontal synchro detected
                 && (m_sampleOffsetDetected > m_samplesPerLine - m_numberSamplesPerHTop))
             {
                 float sampleOffsetDetectedFrac =
-                    (sample - m_settings.m_levelSynchroTop) / (prevSample - sample);
+                    (syncSample - m_settings.m_levelSynchroTop) / (m_prevSyncSample - syncSample);
                 float hSyncShift = -m_sampleOffset - m_sampleOffsetFrac - sampleOffsetDetectedFrac;
                 if (hSyncShift > m_samplesPerLine / 2)
 					hSyncShift -= m_samplesPerLine;
@@ -235,9 +236,9 @@ private:
         if (m_settings.m_vSync)
         {
             if (m_sampleOffset > m_fieldDetectStartPos && m_sampleOffset < m_fieldDetectEndPos)
-                m_fieldDetectSampleCount += sample < m_settings.m_levelSynchroTop;
+                m_fieldDetectSampleCount += syncSample < m_settings.m_levelSynchroTop;
             if (m_sampleOffset > m_vSyncDetectStartPos && m_sampleOffset < m_vSyncDetectEndPos)
-                m_vSyncDetectSampleCount += sample < m_settings.m_levelSynchroTop;
+                m_vSyncDetectSampleCount += syncSample < m_settings.m_levelSynchroTop;
         }
 
         // end of line
@@ -256,7 +257,7 @@ private:
             }
         }
 
-        prevSample = sample;
+        m_prevSyncSample = syncSample;
     }
 
     // Standard vertical sync
@@ -294,8 +295,9 @@ private:
         }
 
         int rowIndex = m_lineIndex - m_firstVisibleLine;
-        if (m_interleaved)
-            rowIndex = rowIndex * 2 - m_fieldIndex;
+        if (m_interleaved) {
+            rowIndex = rowIndex * 2 + (m_fieldIndex == 0 ? m_firstFieldRowOffset : 1 - m_firstFieldRowOffset);
+        }
 
 		m_tvScreenBuffer->selectRow(rowIndex, m_sampleOffsetFrac);
 	}
