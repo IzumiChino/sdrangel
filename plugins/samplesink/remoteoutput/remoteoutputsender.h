@@ -32,6 +32,7 @@
 #include <QMutex>
 #include <QWaitCondition>
 #include <QHostAddress>
+#include <QUdpSocket>
 
 #include "cm256cc/cm256.h"
 
@@ -51,20 +52,26 @@ public:
     RemoteOutputSender();
     ~RemoteOutputSender();
 
+    Q_INVOKABLE bool startWork();
+    Q_INVOKABLE void stopWork();
     RemoteDataFrame *getDataFrame();
     void setDestination(const QString& address, uint16_t port);
 
 private:
+    volatile bool m_running;
+    bool m_socketReady;
+    bool m_socketErrorReported;
     RemoteOutputFifo m_fifo;
     CM256 m_cm256;                       //!< CM256 library object
     CM256 *m_cm256p;
     bool m_cm256Valid;                   //!< true if CM256 library is initialized correctly
 
-    QUdpSocket   *m_udpSocket;
+    QUdpSocket   m_udpSocket;
     QString      m_remoteAddress;
     uint16_t     m_remotePort;
     QHostAddress m_remoteHostAddress;
 
+    bool ensureSocketReady();
     void sendDataFrame(RemoteDataFrame *dataFrame);
 
 private slots:

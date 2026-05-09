@@ -28,6 +28,7 @@
 
 #include <QString>
 #include <QByteArray>
+#include <QSet>
 #include <QTimer>
 #include <QNetworkRequest>
 
@@ -339,6 +340,28 @@ public:
         {}
     };
 
+    class MsgReportRemoteControlStatus : public Message {
+        MESSAGE_CLASS_DECLARATION
+
+    public:
+        const QString& getMessage() const { return m_message; }
+        bool getControlsAvailable() const { return m_controlsAvailable; }
+
+        static MsgReportRemoteControlStatus* create(const QString& message, bool controlsAvailable) {
+            return new MsgReportRemoteControlStatus(message, controlsAvailable);
+        }
+
+    private:
+        QString m_message;
+        bool m_controlsAvailable;
+
+        MsgReportRemoteControlStatus(const QString& message, bool controlsAvailable) :
+            Message(),
+            m_message(message),
+            m_controlsAvailable(controlsAvailable)
+        {}
+    };
+
     class MsgRequestFixedData : public Message {
         MESSAGE_CLASS_DECLARATION
 
@@ -408,6 +431,12 @@ public:
             SWGSDRangel::SWGDeviceSettings& response);
 
 private:
+    enum class RemoteControlMode {
+        Unknown,
+        RemoteSink,
+        GenericStream
+    };
+
 	DeviceAPI *m_deviceAPI;
     int m_sampleRate;
 	QRecursiveMutex m_mutex;
@@ -415,17 +444,24 @@ private:
     RemoteChannelSettings m_remoteChannelSettings;
 	RemoteInputUDPHandler* m_remoteInputUDPHandler;
     RemoteMetaDataFEC m_currentMeta;
+    RemoteControlMode m_remoteControlMode;
+    QString m_remoteControlDescription;
     QString m_remoteAddress;
 	QString m_deviceDescription;
 	std::time_t m_startingTimeStamp;
     QNetworkAccessManager *m_networkManager;
     QNetworkRequest m_networkRequest;
+    QSet<QNetworkReply*> m_ignoredNetworkReplies;
 
     void applySettings(const RemoteInputSettings& settings, const QList<QString>& settingsKeys, bool force = false);
     void applyRemoteChannelSettings(const RemoteChannelSettings& settings);
+    void abortNetworkReplies();
     void webapiFormatDeviceReport(SWGSDRangel::SWGDeviceReport& response);
     void webapiReverseSendSettings(const QList<QString>& deviceSettingsKeys, const RemoteInputSettings& settings, bool force);
     void webapiReverseSendStartStop(bool start);
+    void requestRemoteChannelSettings();
+    void reportRemoteControlStatus(const QString& message, bool controlsAvailable);
+    void setRemoteControlMode(RemoteControlMode mode, const QString& description = QString());
     void analyzeRemoteChannelSettingsReply(const QJsonObject& jsonObject);
     void analyzeInstanceSummaryReply(const QJsonObject& jsonObject);
 

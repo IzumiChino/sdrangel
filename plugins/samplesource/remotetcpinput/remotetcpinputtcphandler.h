@@ -154,6 +154,7 @@ public:
     MessageQueue *getInputMessageQueue() { return &m_inputMessageQueue; }
     void setMessageQueueToInput(MessageQueue *queue) { m_messageQueueToInput = queue; }
     void setMessageQueueToGUI(MessageQueue *queue) { m_messageQueueToGUI = queue; }
+    Q_INVOKABLE void clearMessageQueues();
     void reset();
     void start();
     void stop();

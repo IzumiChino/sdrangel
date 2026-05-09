@@ -87,6 +87,13 @@ RemoteTCPInputTCPHandler::~RemoteTCPInputTCPHandler()
     cleanup();
 }
 
+void RemoteTCPInputTCPHandler::clearMessageQueues()
+{
+    QMutexLocker mutexLocker(&m_mutex);
+    m_messageQueueToInput = nullptr;
+    m_messageQueueToGUI = nullptr;
+}
+
 void RemoteTCPInputTCPHandler::reset()
 {
     QMutexLocker mutexLocker(&m_mutex);

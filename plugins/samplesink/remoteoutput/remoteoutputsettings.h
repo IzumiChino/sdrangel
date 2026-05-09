@@ -25,9 +25,14 @@
 
 struct RemoteOutputSettings
 {
+    static constexpr quint32 m_minSampleRate = 1000;
+    static constexpr quint32 m_maxSampleRate = 20000000;
+
     QString m_title;
     quint32 m_nbFECBlocks;
     quint32 m_nbTxBytes;
+    quint32 m_sampleRate;
+    bool m_overrideRemoteSampleRate;
     QString m_apiAddress;
     quint16 m_apiPort;
     QString m_dataAddress;
@@ -41,6 +46,7 @@ struct RemoteOutputSettings
 
     RemoteOutputSettings();
     void resetToDefaults();
+    static quint32 clampSampleRate(quint32 sampleRate);
     QByteArray serialize() const;
     bool deserialize(const QByteArray& data);
     void applySettings(const QStringList& settingsKeys, const RemoteOutputSettings& settings);

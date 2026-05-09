@@ -17,7 +17,7 @@
 
 #include "udpsinkfec.h"
 
-#include <QThread>
+#include <QMetaObject>
 #include <QDebug>
 
 #include <boost/crc.hpp>
@@ -38,22 +38,16 @@ UDPSinkFEC::UDPSinkFEC() :
     m_frameCount(0),
     m_sampleIndex(0),
     m_remoteOutputSender(nullptr),
-    m_senderThread(nullptr),
     m_remoteAddress("127.0.0.1"),
     m_remotePort(9090)
 {
     memset((char *) &m_superBlock, 0, sizeof(RemoteSuperBlock));
     m_currentMetaFEC.init();
-
-    m_senderThread = new QThread(this);
-    m_remoteOutputSender = new RemoteOutputSender();
-    m_remoteOutputSender->moveToThread(m_senderThread);
 }
 
 UDPSinkFEC::~UDPSinkFEC()
 {
-    delete m_remoteOutputSender;
-    delete m_senderThread;
+    stopSender();
 }
 
 void UDPSinkFEC::init()
@@ -67,15 +61,40 @@ void UDPSinkFEC::init()
 void UDPSinkFEC::startSender()
 {
     qDebug("UDPSinkFEC::startSender");
+
+    if (m_remoteOutputSender) {
+        stopSender();
+    }
+
+    m_remoteOutputSender = new RemoteOutputSender();
     m_remoteOutputSender->setDestination(m_remoteAddress, m_remotePort);
-    m_senderThread->start();
+    m_remoteOutputSender->moveToThread(&m_senderThread);
+    QObject::connect(&m_senderThread, &QThread::finished, m_remoteOutputSender, &QObject::deleteLater);
+    m_senderThread.start();
+    QMetaObject::invokeMethod(m_remoteOutputSender, "startWork", Qt::BlockingQueuedConnection);
 }
 
 void UDPSinkFEC::stopSender()
 {
     qDebug("UDPSinkFEC::stopSender");
-	m_senderThread->exit();
-	m_senderThread->wait();
+
+    if (!m_remoteOutputSender) {
+        return;
+    }
+
+	if (m_senderThread.isRunning())
+    {
+        QMetaObject::invokeMethod(m_remoteOutputSender, "stopWork", Qt::BlockingQueuedConnection);
+	    m_senderThread.quit();
+	    m_senderThread.wait();
+    }
+    else
+    {
+        m_remoteOutputSender->stopWork();
+        delete m_remoteOutputSender;
+    }
+
+    m_remoteOutputSender = nullptr;
 }
 
 void UDPSinkFEC::setNbBlocksFEC(uint32_t nbBlocksFEC)
@@ -95,7 +114,10 @@ void UDPSinkFEC::setRemoteAddress(const QString& address, uint16_t port)
     qDebug() << "UDPSinkFEC::setRemoteAddress: address: " << address << " port: " << port;
     m_remoteAddress = address;
     m_remotePort = port;
-    m_remoteOutputSender->setDestination(m_remoteAddress, m_remotePort);
+
+    if (m_remoteOutputSender) {
+        m_remoteOutputSender->setDestination(m_remoteAddress, m_remotePort);
+    }
 }
 
 void UDPSinkFEC::write(const SampleVector::iterator& begin, uint32_t sampleChunkSize, bool isTx)
@@ -121,9 +143,13 @@ void UDPSinkFEC::write(const SampleVector::iterator& begin, uint32_t sampleChunk
             metaData.m_nbOriginalBlocks = RemoteNbOrginalBlocks;
             metaData.m_nbFECBlocks = m_nbBlocksFEC;
             metaData.m_deviceIndex = m_deviceIndex; // index of device set in the instance
-            metaData.m_channelIndex = 0; // irrelavant
+            metaData.m_channelIndex = RemoteChannelIndexNone; // stream has no RemoteSink control channel
             metaData.m_tv_sec = nowus / 1000000UL;  // tv.tv_sec;
             metaData.m_tv_usec = nowus % 1000000UL; // tv.tv_usec;
+
+            if (!m_remoteOutputSender) {
+                return;
+            }
 
             if (!m_dataFrame) { // on the very first cycle there is no data block allocated
                 m_dataFrame = m_remoteOutputSender->getDataFrame(); // ask a new block to sender
@@ -190,6 +216,10 @@ void UDPSinkFEC::write(const SampleVector::iterator& begin, uint32_t sampleChunk
                 m_dataFrame->m_txControlBlock.m_nbBlocksFEC = m_nbBlocksFEC;
                 m_dataFrame->m_txControlBlock.m_dataAddress = m_remoteAddress;
                 m_dataFrame->m_txControlBlock.m_dataPort = m_remotePort;
+
+                if (!m_remoteOutputSender) {
+                    return;
+                }
 
                 m_dataFrame = m_remoteOutputSender->getDataFrame(); // ask a new block to sender
 

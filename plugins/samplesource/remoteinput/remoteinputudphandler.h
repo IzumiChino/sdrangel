@@ -65,6 +65,7 @@ public:
 	~RemoteInputUDPHandler();
 	void setMessageQueueToInput(MessageQueue *queue) { m_messageQueueToInput = queue; }
 	void setMessageQueueToGUI(MessageQueue *queue) { m_messageQueueToGUI = queue; }
+    void clearMessageQueues();
     void start();
 	void stop();
 	void configureUDPLink(const QString& address, quint16 port, const QString& multicastAddress, bool multicastJoin);
@@ -143,7 +144,7 @@ private:
     int32_t m_readLengthSamples;
     uint32_t m_readLength;
     int32_t *m_converterBuffer;
-    uint32_t m_converterBufferNbSamples;
+	uint32_t m_converterBufferCapacity;
     bool m_throttleToggle;
     bool m_autoCorrBuffer;
 

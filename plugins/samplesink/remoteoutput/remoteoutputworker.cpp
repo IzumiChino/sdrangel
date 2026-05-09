@@ -47,6 +47,10 @@ RemoteOutputWorker::~RemoteOutputWorker()
 
 void RemoteOutputWorker::startWork()
 {
+    if (m_running) {
+        return;
+    }
+
 	qDebug() << "RemoteOutputWorker::startWork: ";
     m_udpSinkFEC.init();
 	m_udpSinkFEC.startSender();
@@ -56,6 +60,10 @@ void RemoteOutputWorker::startWork()
 
 void RemoteOutputWorker::stopWork()
 {
+    if (!m_running) {
+        return;
+    }
+
 	qDebug() << "RemoteOutputWorker::stopWork";
 	m_running = false;
 	m_udpSinkFEC.stopSender();

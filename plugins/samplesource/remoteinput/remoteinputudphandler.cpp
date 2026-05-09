@@ -47,6 +47,7 @@ RemoteInputUDPHandler::RemoteInputUDPHandler(SampleSinkFifo *sampleFifo, DeviceA
 	m_samplerate(0),
 	m_centerFrequency(0),
 	m_tv_msec(0),
+    m_messageQueueToInput(nullptr),
 	m_messageQueueToGUI(0),
 	m_tickCount(0),
 	m_samplesCount(0),
@@ -55,10 +56,11 @@ RemoteInputUDPHandler::RemoteInputUDPHandler(SampleSinkFifo *sampleFifo, DeviceA
     m_readLengthSamples(0),
     m_readLength(0),
     m_converterBuffer(nullptr),
-    m_converterBufferNbSamples(0),
+    m_converterBufferCapacity(0),
     m_throttleToggle(false),
 	m_autoCorrBuffer(true)
 {
+    m_currentMeta.init();
     m_udpBuf = new char[RemoteUdpSize];
 
 #ifdef USE_INTERNAL_TIMER
@@ -84,6 +86,13 @@ RemoteInputUDPHandler::~RemoteInputUDPHandler()
         delete m_timer;
     }
 #endif
+}
+
+void RemoteInputUDPHandler::clearMessageQueues()
+{
+    m_messageQueueToInput = nullptr;
+    m_messageQueueToGUI = nullptr;
+    m_inputMessageQueue.clear();
 }
 
 void RemoteInputUDPHandler::start()
@@ -133,13 +142,15 @@ void RemoteInputUDPHandler::stop()
 {
 	qDebug("RemoteInputUDPHandler::stop");
 
-	if (!m_running) {
+    if (!m_running && !m_dataSocket) {
 	    return;
 	}
 
+    m_running = false;
+
 	disconnectTimer();
 
-    if (m_dataConnected)
+    if (m_dataSocket && m_dataConnected)
     {
 		m_dataConnected = false;
 	    disconnect(m_dataSocket, SIGNAL(readyRead()), this, SLOT(dataReadyRead()));
@@ -147,13 +158,19 @@ void RemoteInputUDPHandler::stop()
 
 	if (m_dataSocket)
 	{
-		delete m_dataSocket;
+        m_dataSocket->close();
+        m_dataSocket->deleteLater();
 		m_dataSocket = nullptr;
 	}
 
+    m_dataConnected = false;
+    m_udpReadBytes = 0;
+
 	m_centerFrequency = 0;
 	m_samplerate = 0;
-	m_running = false;
+    m_currentMeta.init();
+    m_readLengthSamples = 0;
+    m_readLength = 0;
 }
 
 void RemoteInputUDPHandler::configureUDPLink(const QString& address, quint16 port, const QString& multicastAddress, bool multicastJoin)
@@ -194,9 +211,13 @@ void RemoteInputUDPHandler::applyUDPLink(const QString& address, quint16 port, c
 
 void RemoteInputUDPHandler::dataReadyRead()
 {
+    if (!m_running || !m_dataConnected || !m_dataSocket) {
+        return;
+    }
+
     m_udpReadBytes = 0;
 
-	while (m_dataSocket->hasPendingDatagrams() && m_dataConnected)
+    while (m_running && m_dataConnected && m_dataSocket && m_dataSocket->hasPendingDatagrams())
 	{
 		qint64 pendingDataSize = m_dataSocket->pendingDatagramSize();
 		m_udpReadBytes += m_dataSocket->readDatagram(&m_udpBuf[m_udpReadBytes], pendingDataSize, &m_remoteAddress, 0);
@@ -210,6 +231,10 @@ void RemoteInputUDPHandler::dataReadyRead()
 
 void RemoteInputUDPHandler::processData()
 {
+    if (!m_running) {
+        return;
+    }
+
     m_remoteInputBuffer.writeData(m_udpBuf);
     const RemoteMetaDataFEC& metaData =  m_remoteInputBuffer.getCurrentMeta();
 
@@ -310,6 +335,38 @@ void RemoteInputUDPHandler::disconnectTimer()
 
 void RemoteInputUDPHandler::tick()
 {
+    if (!m_running) {
+        return;
+    }
+
+    if ((m_currentMeta.m_sampleRate == 0) || ((m_currentMeta.m_sampleBytes & 0xF) == 0)) {
+        return;
+    }
+
+    const auto ensureConverterCapacity = [this](uint32_t requiredEntries)
+    {
+        if (requiredEntries <= m_converterBufferCapacity) {
+            return;
+        }
+
+        if (m_converterBuffer) {
+            delete[] m_converterBuffer;
+        }
+
+        m_converterBuffer = new int32_t[requiredEntries];
+        m_converterBufferCapacity = requiredEntries;
+    };
+
+    const auto writeSamples = [this](const quint8 *data, uint32_t length, int32_t expectedSamples)
+    {
+        const unsigned int writtenSamples = m_sampleFifo->write(data, length);
+        m_samplesCount += writtenSamples;
+
+        if ((expectedSamples > 0) && (writtenSamples != static_cast<unsigned int>(expectedSamples))) {
+            qWarning("RemoteInputUDPHandler::tick: sample FIFO accepted %u/%d samples", writtenSamples, expectedSamples);
+        }
+    };
+
     // auto throttling
     int throttlems = m_elapsedTimer.restart();
 
@@ -334,16 +391,11 @@ void RemoteInputUDPHandler::tick()
     if (m_currentMeta.m_sampleBits == SDR_RX_SAMP_SZ) // no conversion
     {
         // read samples directly feeding the SampleFifo (no callback)
-        m_sampleFifo->write(reinterpret_cast<quint8*>(m_remoteInputBuffer.readData(m_readLength)), m_readLength);
-        m_samplesCount += m_readLengthSamples;
+        writeSamples(reinterpret_cast<quint8*>(m_remoteInputBuffer.readData(m_readLength)), m_readLength, m_readLengthSamples);
     }
     else if ((m_currentMeta.m_sampleBits == 8) && (SDR_RX_SAMP_SZ == 16)) // 8 -> 16
     {
-        if (m_readLengthSamples > (int) m_converterBufferNbSamples)
-        {
-            if (m_converterBuffer) { delete[] m_converterBuffer; }
-            m_converterBuffer = new int32_t[m_readLengthSamples];
-        }
+        ensureConverterCapacity(m_readLengthSamples);
 
         int8_t *buf = (int8_t*) m_remoteInputBuffer.readData(m_readLength);
 
@@ -353,14 +405,12 @@ void RemoteInputUDPHandler::tick()
             m_converterBuffer[is] <<= 16;
             m_converterBuffer[is] += buf[2*is] * (1<<8);  // I -> LSB
         }
+
+        writeSamples(reinterpret_cast<quint8*>(m_converterBuffer), m_readLengthSamples*sizeof(Sample), m_readLengthSamples);
     }
     else if ((m_currentMeta.m_sampleBits == 8) && (SDR_RX_SAMP_SZ == 24)) // 8 -> 24
     {
-        if (m_readLengthSamples > (int) m_converterBufferNbSamples)
-        {
-            if (m_converterBuffer) { delete[] m_converterBuffer; }
-            m_converterBuffer = new int32_t[m_readLengthSamples*2];
-        }
+        ensureConverterCapacity(m_readLengthSamples * 2);
 
         int8_t *buf = (int8_t*) m_remoteInputBuffer.readData(m_readLength);
 
@@ -370,15 +420,11 @@ void RemoteInputUDPHandler::tick()
             m_converterBuffer[2*is+1] = buf[2*is+1] * (1<<16); // Q
         }
 
-        m_sampleFifo->write(reinterpret_cast<quint8*>(m_converterBuffer), m_readLengthSamples*sizeof(Sample));
+        writeSamples(reinterpret_cast<quint8*>(m_converterBuffer), m_readLengthSamples*sizeof(Sample), m_readLengthSamples);
     }
     else if (m_currentMeta.m_sampleBits == 16) // 16 -> 24
     {
-        if (m_readLengthSamples > (int) m_converterBufferNbSamples)
-        {
-            if (m_converterBuffer) { delete[] m_converterBuffer; }
-            m_converterBuffer = new int32_t[m_readLengthSamples*2];
-        }
+        ensureConverterCapacity(m_readLengthSamples * 2);
 
         int16_t *buf = (int16_t*) m_remoteInputBuffer.readData(m_readLength);
 
@@ -388,15 +434,11 @@ void RemoteInputUDPHandler::tick()
             m_converterBuffer[2*is+1] = buf[2*is+1] * (1<<8); // Q
         }
 
-        m_sampleFifo->write(reinterpret_cast<quint8*>(m_converterBuffer), m_readLengthSamples*sizeof(Sample));
+        writeSamples(reinterpret_cast<quint8*>(m_converterBuffer), m_readLengthSamples*sizeof(Sample), m_readLengthSamples);
     }
     else if (m_currentMeta.m_sampleBits == 24) // 24 -> 16
     {
-        if (m_readLengthSamples > (int) m_converterBufferNbSamples)
-        {
-            if (m_converterBuffer) { delete[] m_converterBuffer; }
-            m_converterBuffer = new int32_t[m_readLengthSamples];
-        }
+        ensureConverterCapacity(m_readLengthSamples);
 
         int32_t *buf = (int32_t*) m_remoteInputBuffer.readData(m_readLength);
 
@@ -407,7 +449,7 @@ void RemoteInputUDPHandler::tick()
             m_converterBuffer[is] += buf[2*is] / (1<<8);   // I -> LSB
         }
 
-        m_sampleFifo->write(reinterpret_cast<quint8*>(m_converterBuffer), m_readLengthSamples*sizeof(Sample));
+        writeSamples(reinterpret_cast<quint8*>(m_converterBuffer), m_readLengthSamples*sizeof(Sample), m_readLengthSamples);
     }
     else // invalid size
     {

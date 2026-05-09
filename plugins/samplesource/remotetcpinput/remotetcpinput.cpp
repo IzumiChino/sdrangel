@@ -24,6 +24,7 @@
 #include <QNetworkReply>
 #include <QBuffer>
 #include <QJsonParseError>
+#include <QMetaObject>
 
 #include "SWGDeviceSettings.h"
 #include "SWGDeviceState.h"
@@ -78,6 +79,18 @@ RemoteTCPInput::RemoteTCPInput(DeviceAPI *deviceAPI) :
 RemoteTCPInput::~RemoteTCPInput()
 {
     qDebug() << "RemoteTCPInput::~RemoteTCPInput";
+
+    if (m_remoteInputTCPPHandler)
+    {
+        if (m_thread.isRunning()) {
+            QMetaObject::invokeMethod(m_remoteInputTCPPHandler, "clearMessageQueues", Qt::BlockingQueuedConnection);
+        } else {
+            m_remoteInputTCPPHandler->clearMessageQueues();
+        }
+    }
+
+    stop();
+
     QObject::disconnect(
         m_networkManager,
         &QNetworkAccessManager::finished,
@@ -85,8 +98,9 @@ RemoteTCPInput::~RemoteTCPInput()
         &RemoteTCPInput::networkManagerFinished
     );
     delete m_networkManager;
-    stop();
-    m_remoteInputTCPPHandler->deleteLater();
+
+    delete m_remoteInputTCPPHandler;
+    m_remoteInputTCPPHandler = nullptr;
 }
 
 void RemoteTCPInput::destroy()

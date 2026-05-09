@@ -17,8 +17,21 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include "util/simpleserializer.h"
 #include "remoteoutputsettings.h"
+
+namespace {
+
+bool isLoopbackApiAddress(const QString& address)
+{
+    return (address == "127.0.0.1") ||
+        (address == "localhost") ||
+        (address == "::1");
+}
+
+} // namespace
 
 RemoteOutputSettings::RemoteOutputSettings()
 {
@@ -30,8 +43,10 @@ void RemoteOutputSettings::resetToDefaults()
     m_title = "RemoteOutput";
     m_nbFECBlocks = 0;
     m_nbTxBytes = 2;
+    m_sampleRate = 48000;
+    m_overrideRemoteSampleRate = false;
     m_apiAddress = "127.0.0.1";
-    m_apiPort = 9091;
+    m_apiPort = 8091;
     m_dataAddress = "127.0.0.1";
     m_dataPort = 9090;
     m_deviceIndex = 0;
@@ -42,6 +57,11 @@ void RemoteOutputSettings::resetToDefaults()
     m_reverseAPIDeviceIndex = 0;
 }
 
+quint32 RemoteOutputSettings::clampSampleRate(quint32 sampleRate)
+{
+    return std::clamp(sampleRate, m_minSampleRate, m_maxSampleRate);
+}
+
 QByteArray RemoteOutputSettings::serialize() const
 {
     SimpleSerializer s(1);
@@ -49,6 +69,8 @@ QByteArray RemoteOutputSettings::serialize() const
     s.writeString(2, m_title);
     s.writeU32(3, m_nbTxBytes);
     s.writeU32(4, m_nbFECBlocks);
+    s.writeU32(16, m_sampleRate);
+    s.writeBool(17, m_overrideRemoteSampleRate);
     s.writeString(5, m_apiAddress);
     s.writeU32(6, m_apiPort);
     s.writeString(7, m_dataAddress);
@@ -80,9 +102,18 @@ bool RemoteOutputSettings::deserialize(const QByteArray& data)
         d.readString(2, &m_title, "RemoteOutput");
         d.readU32(3, &m_nbTxBytes, 2);
         d.readU32(4, &m_nbFECBlocks, 0);
+        d.readU32(16, &m_sampleRate, 48000);
+        m_sampleRate = clampSampleRate(m_sampleRate);
+        d.readBool(17, &m_overrideRemoteSampleRate, false);
         d.readString(5, &m_apiAddress, "127.0.0.1");
-        d.readU32(6, &uintval, 9090);
+        d.readU32(6, &uintval, 8091);
         m_apiPort = uintval % (1<<16);
+
+        // Migrate legacy local default saved with the wrong RemoteOutput API port.
+        if ((m_apiPort == 9091) && isLoopbackApiAddress(m_apiAddress)) {
+            m_apiPort = 8091;
+        }
+
         d.readString(7, &m_dataAddress, "127.0.0.1");
         d.readU32(8, &uintval, 9090);
         m_dataPort = uintval % (1<<16);
@@ -120,6 +151,12 @@ void RemoteOutputSettings::applySettings(const QStringList& settingsKeys, const 
     }
     if (settingsKeys.contains("nbTxBytes")) {
         m_nbTxBytes = settings.m_nbTxBytes;
+    }
+    if (settingsKeys.contains("sampleRate")) {
+        m_sampleRate = clampSampleRate(settings.m_sampleRate);
+    }
+    if (settingsKeys.contains("overrideRemoteSampleRate")) {
+        m_overrideRemoteSampleRate = settings.m_overrideRemoteSampleRate;
     }
     if (settingsKeys.contains("apiAddress")) {
         m_apiAddress = settings.m_apiAddress;
@@ -165,6 +202,12 @@ QString RemoteOutputSettings::getDebugString(const QStringList& settingsKeys, bo
     }
     if (settingsKeys.contains("nbTxBytes") || force) {
         ostr << " m_nbTxBytes: " << m_nbTxBytes;
+    }
+    if (settingsKeys.contains("sampleRate") || force) {
+        ostr << " m_sampleRate: " << m_sampleRate;
+    }
+    if (settingsKeys.contains("overrideRemoteSampleRate") || force) {
+        ostr << " m_overrideRemoteSampleRate: " << m_overrideRemoteSampleRate;
     }
     if (settingsKeys.contains("apiAddress") || force) {
         ostr << " m_apiAddress: " << m_apiAddress.toStdString();

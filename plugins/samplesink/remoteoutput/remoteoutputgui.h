@@ -87,7 +87,6 @@ private:
 	RemoteOutputSettings m_controlSettings; //!< settings last sent to device via control port
 	QTimer m_updateTimer;
     QTimer m_statusTimer;
-	DeviceSampleSink* m_remoteOutput;
     int m_sampleRate;
     quint64 m_deviceCenterFrequency; //!< Center frequency in device
 	int m_samplesCount;
@@ -97,6 +96,7 @@ private:
     bool m_doApplySettings;
     bool m_forceSettings;
     bool m_remoteAPIConnected;
+    bool m_remoteUsesDeviceReport;
 
     uint32_t m_countUnrecoverable;
     uint32_t m_countRecovered;
@@ -117,14 +117,19 @@ private:
 	void displayTime();
     void displayRemoteData(const RemoteOutput::MsgReportRemoteData::RemoteData& remoteData);
     void displayRemoteFixedData(const RemoteOutput::MsgReportRemoteFixedData::RemoteData& remoteData);
+    void setChannelIndexEnabled(bool enabled);
     void sendControl(bool force = false);
 	void sendSettings();
 	void updateSampleRate();
+    void displayManualSampleRate(quint32 sampleRate, int preferredUnitIndex = -1);
+    bool applyManualSampleRateSetting();
 	void displayEventCounts();
 	void displayEventStatus(int recoverableCount, int unrecoverableCount);
     void displayEventTimer();
 	bool handleMessage(const Message& message);
     void makeUIConnections();
+    RemoteOutput *getRemoteOutput() const;
+    bool pushMessageToRemoteOutput(Message *message) const;
 
 private slots:
     void handleInputMessages();
@@ -132,6 +137,8 @@ private slots:
     void on_deviceIndex_returnPressed();
     void on_channelIndex_returnPressed();
     void on_nbTxBytes_currentIndexChanged(int index);
+    void on_manualSampleRateOverride_toggled(bool checked);
+    void on_manualSampleRate_returnPressed();
     void on_apiAddress_returnPressed();
     void on_apiPort_returnPressed();
     void on_dataAddress_returnPressed();

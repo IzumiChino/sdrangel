@@ -17,12 +17,9 @@
 
 #include "remoteoutputfifo.h"
 
-RemoteOutputFifo::RemoteOutputFifo(QObject *parent) :
-    QObject(parent)
-{}
+RemoteOutputFifo::RemoteOutputFifo() = default;
 
-RemoteOutputFifo::RemoteOutputFifo(unsigned int size, QObject *parent) :
-    QObject(parent)
+RemoteOutputFifo::RemoteOutputFifo(unsigned int size)
 {
     resize(size);
 }
@@ -32,7 +29,7 @@ RemoteOutputFifo::~RemoteOutputFifo()
 
 void RemoteOutputFifo::resize(unsigned int size)
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::mutex> mutexLocker(m_mutex);
     m_size = size;
     m_data.resize(m_size);
     m_readHead = 0;
@@ -49,22 +46,27 @@ void RemoteOutputFifo::reset()
 
 RemoteDataFrame *RemoteOutputFifo::getDataFrame()
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    m_servedHead = m_writeHead;
+    {
+        std::lock_guard<std::mutex> mutexLocker(m_mutex);
+        m_servedHead = m_writeHead;
 
-    if (m_writeHead < m_size - 1) {
-        m_writeHead++;
-    } else {
-        m_writeHead = 0;
+        if (m_writeHead < m_size - 1) {
+            m_writeHead++;
+        } else {
+            m_writeHead = 0;
+        }
     }
 
-    emit dataBlockServed();
+    if (m_dataBlockServedCallback) {
+        m_dataBlockServedCallback();
+    }
+
     return &m_data[m_servedHead];
 }
 
 unsigned int RemoteOutputFifo::readDataFrame(RemoteDataFrame **dataFrame)
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::mutex> mutexLocker(m_mutex);
 
     if (calculateRemainder() == 0)
     {
@@ -81,7 +83,7 @@ unsigned int RemoteOutputFifo::readDataFrame(RemoteDataFrame **dataFrame)
 
 unsigned int RemoteOutputFifo::getRemainder()
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::mutex> mutexLocker(m_mutex);
     return calculateRemainder();
 }
 

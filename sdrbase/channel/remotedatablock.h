@@ -101,6 +101,7 @@ struct RemoteHeader
 static const int RemoteUdpSize = UDPSINKFEC_UDPSIZE;
 static const int RemoteNbOrginalBlocks = UDPSINKFEC_NBORIGINALBLOCKS;
 static const int RemoteNbBytesPerBlock = UDPSINKFEC_UDPSIZE - sizeof(RemoteHeader);
+static const uint8_t RemoteChannelIndexNone = 0xFF;
 
 struct RemoteProtectedBlock
 {

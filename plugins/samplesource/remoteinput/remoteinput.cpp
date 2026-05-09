@@ -21,7 +21,9 @@
 #include <errno.h>
 
 #include <QDebug>
+#include <QMetaObject>
 #include <QNetworkReply>
+#include <QThread>
 #include <QBuffer>
 #include <QJsonParseError>
 
@@ -37,6 +39,24 @@
 #include "remoteinput.h"
 #include "remoteinputudphandler.h"
 
+namespace {
+
+QString findSettingsType(const QJsonObject& jsonObject)
+{
+    const auto keys = jsonObject.keys();
+
+    for (const auto& key : keys)
+    {
+        if (key.endsWith("Settings")) {
+            return key;
+        }
+    }
+
+    return {};
+}
+
+} // namespace
+
 MESSAGE_CLASS_DEFINITION(RemoteInput::MsgConfigureRemoteInput, Message)
 MESSAGE_CLASS_DEFINITION(RemoteInput::MsgConfigureRemoteInputTiming, Message)
 MESSAGE_CLASS_DEFINITION(RemoteInput::MsgReportRemoteInputAcquisition, Message)
@@ -46,6 +66,7 @@ MESSAGE_CLASS_DEFINITION(RemoteInput::MsgConfigureRemoteChannel, Message)
 MESSAGE_CLASS_DEFINITION(RemoteInput::MsgStartStop, Message)
 MESSAGE_CLASS_DEFINITION(RemoteInput::MsgReportRemoteFixedData, Message)
 MESSAGE_CLASS_DEFINITION(RemoteInput::MsgReportRemoteAPIError, Message)
+MESSAGE_CLASS_DEFINITION(RemoteInput::MsgReportRemoteControlStatus, Message)
 MESSAGE_CLASS_DEFINITION(RemoteInput::MsgRequestFixedData, Message)
 
 RemoteInput::RemoteInput(DeviceAPI *deviceAPI) :
@@ -53,6 +74,7 @@ RemoteInput::RemoteInput(DeviceAPI *deviceAPI) :
     m_sampleRate(48000),
     m_settings(),
 	m_remoteInputUDPHandler(nullptr),
+    m_remoteControlMode(RemoteControlMode::Unknown),
 	m_deviceDescription("RemoteInput"),
 	m_startingTimeStamp(0)
 {
@@ -74,6 +96,13 @@ RemoteInput::RemoteInput(DeviceAPI *deviceAPI) :
 
 RemoteInput::~RemoteInput()
 {
+    if (m_remoteInputUDPHandler)
+    {
+        m_remoteInputUDPHandler->clearMessageQueues();
+    }
+
+    stop();
+
     QObject::disconnect(
         m_networkManager,
         &QNetworkAccessManager::finished,
@@ -81,8 +110,11 @@ RemoteInput::~RemoteInput()
         &RemoteInput::networkManagerFinished
     );
     delete m_networkManager;
-	stop();
+    m_networkManager = nullptr;
+    m_ignoredNetworkReplies.clear();
+
     delete m_remoteInputUDPHandler;
+    m_remoteInputUDPHandler = nullptr;
 }
 
 void RemoteInput::destroy()
@@ -97,14 +129,45 @@ void RemoteInput::init()
 
 bool RemoteInput::start()
 {
+	if (QThread::currentThread() != thread())
+    {
+        bool started = false;
+        QMetaObject::invokeMethod(this, [this, &started]() {
+            started = start();
+        }, Qt::BlockingQueuedConnection);
+        return started;
+    }
+
 	qDebug() << "RemoteInput::start";
+    m_ignoredNetworkReplies.clear();
+    m_remoteInputUDPHandler->setMessageQueueToInput(&m_inputMessageQueue);
+
+    if (m_guiMessageQueue) {
+        m_remoteInputUDPHandler->setMessageQueueToGUI(m_guiMessageQueue);
+    }
+
     m_remoteInputUDPHandler->start();
 	return true;
 }
 
 void RemoteInput::stop()
 {
+	if (QThread::currentThread() != thread())
+    {
+        QMetaObject::invokeMethod(this, [this]() {
+            stop();
+        }, Qt::BlockingQueuedConnection);
+        return;
+    }
+
 	qDebug() << "RemoteInput::stop";
+
+    abortNetworkReplies();
+
+    if (m_remoteInputUDPHandler)
+    {
+        m_remoteInputUDPHandler->stop();
+    }
 }
 
 QByteArray RemoteInput::serialize() const
@@ -193,14 +256,7 @@ bool RemoteInput::handleMessage(const Message& message)
         }
 
         m_currentMeta = m_remoteInputUDPHandler->getCurrentMeta();
-        QString getSettingsURL= QString("http://%1:%2/sdrangel/deviceset/%3/channel/%4/settings")
-            .arg(m_settings.m_apiAddress)
-            .arg(m_settings.m_apiPort)
-            .arg(m_currentMeta.m_deviceIndex)
-            .arg(m_currentMeta.m_channelIndex);
-
-        m_networkRequest.setUrl(QUrl(getSettingsURL));
-        m_networkManager->get(m_networkRequest);
+        requestRemoteChannelSettings();
 
         return true;
     }
@@ -263,6 +319,13 @@ bool RemoteInput::handleMessage(const Message& message)
 void RemoteInput::applySettings(const RemoteInputSettings& settings, const QList<QString>& settingsKeys, bool force)
 {
     qDebug() << "RemoteInput::applySettings: force: " << force << settings.getDebugString(settingsKeys, force);
+
+    if (force || settingsKeys.contains("apiAddress") || settingsKeys.contains("apiPort"))
+    {
+        m_remoteControlMode = RemoteControlMode::Unknown;
+        m_remoteControlDescription.clear();
+    }
+
     QMutexLocker mutexLocker(&m_mutex);
     std::ostringstream os;
     QString remoteAddress;
@@ -305,8 +368,33 @@ void RemoteInput::applySettings(const RemoteInputSettings& settings, const QList
     m_remoteAddress = remoteAddress;
 }
 
+void RemoteInput::abortNetworkReplies()
+{
+    if (!m_networkManager) {
+        return;
+    }
+
+    const auto replies = m_networkManager->findChildren<QNetworkReply*>();
+
+    for (auto *reply : replies)
+    {
+        if (!reply) {
+            continue;
+        }
+
+        m_ignoredNetworkReplies.insert(reply);
+        reply->abort();
+    }
+}
+
 void RemoteInput::applyRemoteChannelSettings(const RemoteChannelSettings& settings)
 {
+    if (m_remoteControlMode != RemoteControlMode::RemoteSink)
+    {
+        qDebug() << "RemoteInput::applyRemoteChannelSettings: skipping update in generic stream mode";
+        return;
+    }
+
     if (m_remoteChannelSettings.m_deviceSampleRate == 1) { // uninitialized
         return;
     }
@@ -364,6 +452,56 @@ void RemoteInput::applyRemoteChannelSettings(const RemoteChannelSettings& settin
         << " m_deviceSampleRate: " << m_remoteChannelSettings.m_deviceSampleRate
         << " m_log2Decim: " << m_remoteChannelSettings.m_log2Decim
         << " m_filterChainHash: " << m_remoteChannelSettings.m_filterChainHash;
+}
+
+void RemoteInput::requestRemoteChannelSettings()
+{
+    if (m_currentMeta.m_channelIndex == RemoteChannelIndexNone)
+    {
+        setRemoteControlMode(RemoteControlMode::GenericStream, "RemoteOutput");
+        return;
+    }
+
+    const auto getSettingsURL = QString("http://%1:%2/sdrangel/deviceset/%3/channel/%4/settings")
+        .arg(m_settings.m_apiAddress)
+        .arg(m_settings.m_apiPort)
+        .arg(m_currentMeta.m_deviceIndex)
+        .arg(m_currentMeta.m_channelIndex);
+
+    m_networkRequest.setUrl(QUrl(getSettingsURL));
+    m_networkManager->get(m_networkRequest);
+}
+
+void RemoteInput::reportRemoteControlStatus(const QString& message, bool controlsAvailable)
+{
+    if (!m_guiMessageQueue) {
+        return;
+    }
+
+    auto *msg = MsgReportRemoteControlStatus::create(message, controlsAvailable);
+    m_guiMessageQueue->push(msg);
+}
+
+void RemoteInput::setRemoteControlMode(RemoteControlMode mode, const QString& description)
+{
+    if ((mode == m_remoteControlMode) && (description == m_remoteControlDescription)) {
+        return;
+    }
+
+    m_remoteControlMode = mode;
+    m_remoteControlDescription = description;
+
+    if (mode == RemoteControlMode::RemoteSink)
+    {
+        reportRemoteControlStatus("RemoteSink controls available.", true);
+    }
+    else if (mode == RemoteControlMode::GenericStream)
+    {
+        const auto message = description.isEmpty() ?
+            QString("Generic remote stream detected. RemoteSink controls are unavailable.") :
+            QString("Streaming from %1. RemoteSink controls are unavailable.").arg(description);
+        reportRemoteControlStatus(message, false);
+    }
 }
 
 int RemoteInput::webapiRunGet(
@@ -451,7 +589,7 @@ void RemoteInput::webapiUpdateDeviceSettings(
     if (deviceSettingsKeys.contains("multicastAddress")) {
         settings.m_multicastAddress = *response.getRemoteInputSettings()->getMulticastAddress();
     }
-    if (deviceSettingsKeys.contains("multicastAddress")) {
+    if (deviceSettingsKeys.contains("multicastJoin")) {
         settings.m_multicastJoin = response.getRemoteInputSettings()->getMulticastJoin() != 0;
     }
     if (deviceSettingsKeys.contains("dcBlock")) {
@@ -617,18 +755,28 @@ void RemoteInput::webapiReverseSendStartStop(bool start)
 
 void RemoteInput::networkManagerFinished(QNetworkReply *reply)
 {
+    if (m_ignoredNetworkReplies.remove(reply) > 0)
+    {
+        reply->deleteLater();
+        return;
+    }
+
     QNetworkReply::NetworkError replyError = reply->error();
+    const QString replyUrl = reply->url().toString();
 
     if (replyError)
     {
         qWarning() << "RemoteInput::networkManagerFinished:"
                 << " error(" << (int) replyError
                 << "): " << replyError
-                << ": " << reply->errorString();
+                << ": " << reply->errorString()
+                << " for " << replyUrl;
 
         if (m_guiMessageQueue)
         {
-            MsgReportRemoteAPIError *msg = MsgReportRemoteAPIError::create(reply->errorString());
+            const QString errorMessage = QString("%1 (%2)")
+                .arg(reply->errorString(), replyUrl);
+            MsgReportRemoteAPIError *msg = MsgReportRemoteAPIError::create(errorMessage);
             m_guiMessageQueue->push(msg);
         }
     }
@@ -650,6 +798,30 @@ void RemoteInput::networkManagerFinished(QNetworkReply *reply)
                 analyzeRemoteChannelSettingsReply(jsonObject);
             } else if (jsonObject.contains("version")) {
                 analyzeInstanceSummaryReply(jsonObject);
+            } else {
+                const QStringList replyKeys = jsonObject.keys();
+                const auto returnedSettingsType = findSettingsType(jsonObject);
+
+                if (!returnedSettingsType.isEmpty())
+                {
+                    qInfo().noquote() << "RemoteInput::networkManagerFinished: treating"
+                        << returnedSettingsType
+                        << "as a generic remote stream for"
+                        << replyUrl;
+                    setRemoteControlMode(RemoteControlMode::GenericStream, returnedSettingsType);
+                }
+                else
+                {
+                    const QString errorMessage = QString("Unsupported reply from remote API (%1): top-level keys [%2]")
+                        .arg(replyUrl, replyKeys.join(", "));
+                    qWarning().noquote() << "RemoteInput::networkManagerFinished:" << errorMessage;
+
+                    if (m_guiMessageQueue)
+                    {
+                        MsgReportRemoteAPIError *msg = MsgReportRemoteAPIError::create(errorMessage);
+                        m_guiMessageQueue->push(msg);
+                    }
+                }
             }
         }
         else
@@ -695,11 +867,14 @@ void RemoteInput::analyzeInstanceSummaryReply(const QJsonObject& jsonObject)
     {
         MsgReportRemoteFixedData *msg = MsgReportRemoteFixedData::create(msgRemoteFixedData);
         m_guiMessageQueue->push(msg);
+        reportRemoteControlStatus("Connected. Waiting for stream metadata.", false);
     }
 }
 
 void RemoteInput::analyzeRemoteChannelSettingsReply(const QJsonObject& jsonObject)
 {
+    setRemoteControlMode(RemoteControlMode::RemoteSink, "RemoteSink");
+
     QJsonObject settings = jsonObject["RemoteSinkSettings"].toObject();
     m_remoteChannelSettings.m_deviceCenterFrequency = settings["deviceCenterFrequency"].toInt();
     m_remoteChannelSettings.m_deviceSampleRate = settings["deviceSampleRate"].toInt();
