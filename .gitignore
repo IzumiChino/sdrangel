@@ -53,3 +53,4 @@ wdsp/*.o
 wdsp/*.h
 wdsp/*.c
 wdsp/Makefile
+scriptsapi/datv_ffmpeg_test.sh
