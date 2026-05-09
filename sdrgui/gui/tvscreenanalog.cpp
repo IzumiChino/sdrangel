@@ -51,29 +51,14 @@ static const char* fragmentShaderSource2 =
     "uniform highp float tlh;\n"
     "varying highp vec2 texCoordVar;\n"
     "void main() {\n"
-    "    float tlhw = 0.5 * tlw;"
-    "    float tlhh = 0.5 * tlh;"
-    "    float tys = (texCoordVar.y + tlhh) * imh;\n"
-    "    float p1y = floor(tys) * tlh - tlhh;\n"
-    "    float p3y = p1y + tlh;\n"
-    "    float tshift1 = texture2D(tex2, vec2(0.0, p1y)).r;\n"
-    "    float tshift3 = texture2D(tex2, vec2(0.0, p3y)).r;\n"
-    "    float shift1 = (1.0 - tshift1 * 2.0) * tlw;\n"
-    "    float shift3 = (1.0 - tshift3 * 2.0) * tlw;\n"
-    "    float txs1 = (texCoordVar.x + shift1 + tlhw) * imw;\n"
-    "    float txs3 = (texCoordVar.x + shift3 + tlhw) * imw;\n"
-    "    float p1x = floor(txs1) * tlw - tlhw;\n"
-    "    float p3x = floor(txs3) * tlw - tlhw;\n"
-    "    float p2x = p1x + tlw;\n"
-    "    float p4x = p3x + tlw;\n"
-    "    float p1 = texture2D(tex1, vec2(p1x, p1y)).r;\n"
-    "    float p2 = texture2D(tex1, vec2(p2x, p1y)).r;\n"
-    "    float p3 = texture2D(tex1, vec2(p3x, p3y)).r;\n"
-    "    float p4 = texture2D(tex1, vec2(p4x, p3y)).r;\n"
-    "    float p12 = mix(p1, p2, fract(txs1));\n"
-    "    float p34 = mix(p3, p4, fract(txs3));\n"
-    "    float p = mix(p12, p34, fract(tys));\n"
-    "    gl_FragColor = vec4(p);\n"
+    "    float lineIndex = clamp(floor(texCoordVar.y * imh), 0.0, imh - 1.0);\n"
+    "    float rowY = (lineIndex + 0.5) * tlh;\n"
+    "    float tshift = texture2D(tex2, vec2(0.5, rowY)).r;\n"
+    "    float shift = (tshift * 2.0 - 1.0) * tlw;\n"
+    "    float columnIndex = clamp(floor((texCoordVar.x + shift) * imw), 0.0, imw - 1.0);\n"
+    "    float sampleX = (columnIndex + 0.5) * tlw;\n"
+    "    float p = texture2D(tex1, vec2(sampleX, rowY)).r;\n"
+    "    gl_FragColor = vec4(p, p, p, 1.0);\n"
     "}\n";
 
 static const char* fragmentShaderSource =
@@ -87,29 +72,14 @@ static const char* fragmentShaderSource =
     "in highp vec2 texCoordVar;\n"
     "out vec4 fragColor;\n"
     "void main() {\n"
-    "    float tlhw = 0.5 * tlw;"
-    "    float tlhh = 0.5 * tlh;"
-    "    float tys = (texCoordVar.y + tlhh) * imh;\n"
-    "    float p1y = floor(tys) * tlh - tlhh;\n"
-    "    float p3y = p1y + tlh;\n"
-    "    float tshift1 = texture(tex2, vec2(0.0, p1y)).r;\n"
-    "    float tshift3 = texture(tex2, vec2(0.0, p3y)).r;\n"
-    "    float shift1 = (1.0 - tshift1 * 2.0) * tlw;\n"
-    "    float shift3 = (1.0 - tshift3 * 2.0) * tlw;\n"
-    "    float txs1 = (texCoordVar.x + shift1 + tlhw) * imw;\n"
-    "    float txs3 = (texCoordVar.x + shift3 + tlhw) * imw;\n"
-    "    float p1x = floor(txs1) * tlw - tlhw;\n"
-    "    float p3x = floor(txs3) * tlw - tlhw;\n"
-    "    float p2x = p1x + tlw;\n"
-    "    float p4x = p3x + tlw;\n"
-    "    float p1 = texture(tex1, vec2(p1x, p1y)).r;\n"
-    "    float p2 = texture(tex1, vec2(p2x, p1y)).r;\n"
-    "    float p3 = texture(tex1, vec2(p3x, p3y)).r;\n"
-    "    float p4 = texture(tex1, vec2(p4x, p3y)).r;\n"
-    "    float p12 = mix(p1, p2, fract(txs1));\n"
-    "    float p34 = mix(p3, p4, fract(txs3));\n"
-    "    float p = mix(p12, p34, fract(tys));\n"
-    "    fragColor = vec4(p);\n"
+    "    float lineIndex = clamp(floor(texCoordVar.y * imh), 0.0, imh - 1.0);\n"
+    "    float rowY = (lineIndex + 0.5) * tlh;\n"
+    "    float tshift = texture(tex2, vec2(0.5, rowY)).r;\n"
+    "    float shift = (tshift * 2.0 - 1.0) * tlw;\n"
+    "    float columnIndex = clamp(floor((texCoordVar.x + shift) * imw), 0.0, imw - 1.0);\n"
+    "    float sampleX = (columnIndex + 0.5) * tlw;\n"
+    "    float p = texture(tex1, vec2(sampleX, rowY)).r;\n"
+    "    fragColor = vec4(p, p, p, 1.0);\n"
     "}\n";
 
 TVScreenAnalog::TVScreenAnalog(QWidget *parent)	:
@@ -121,6 +91,7 @@ TVScreenAnalog::TVScreenAnalog(QWidget *parent)	:
 	m_imageTexture(nullptr),
 	m_lineShiftsTexture(nullptr)
 {
+    setAttribute(Qt::WA_OpaquePaintEvent);
 	m_isDataChanged = false;
 	m_frontBuffer = new TVScreenAnalogBuffer(5, 1);
 	m_backBuffer = new TVScreenAnalogBuffer(5, 1);
@@ -283,6 +254,8 @@ void TVScreenAnalog::initializeGL()
 
 void TVScreenAnalog::initializeTextures(TVScreenAnalogBuffer *buffer)
 {
+    delete m_imageTexture;
+    delete m_lineShiftsTexture;
 	m_imageTexture = new QOpenGLTexture(QOpenGLTexture::Target2D);
 	m_lineShiftsTexture = new QOpenGLTexture(QOpenGLTexture::Target2D);
 	m_imageTexture->setSize(buffer->getWidth(), buffer->getHeight());
@@ -308,6 +281,7 @@ TVScreenAnalogBuffer *TVScreenAnalog::swapBuffers()
 {
 	QMutexLocker lock(&m_buffersMutex);
 	std::swap(m_frontBuffer, m_backBuffer);
+    m_backBuffer->clear();
 	m_isDataChanged = true;
 	return m_backBuffer;
 }
@@ -331,7 +305,8 @@ void TVScreenAnalog::paintGL()
 		return;
 	}
 
-	TVScreenAnalogBuffer *buffer = m_frontBuffer;
+    QMutexLocker lock(&m_buffersMutex);
+    TVScreenAnalogBuffer *buffer = m_frontBuffer;
 
 	if (!m_imageTexture ||
 		m_imageTexture->width() != buffer->getWidth() ||
@@ -363,21 +338,23 @@ void TVScreenAnalog::paintGL()
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
 		1, buffer->getHeight(), GL_RGBA, GL_UNSIGNED_BYTE, buffer->getLineShiftData());
 
-	float rectHalfWidth = 1.0f + 4.0f / (imageWidth - 4.0f);
+    constexpr float guardColumns = 2.0f;
+    const float leftTexCoord = (guardColumns + 0.5f) / imageWidth;
+    const float rightTexCoord = (imageWidth - guardColumns - 0.5f) / imageWidth;
 	GLfloat vertices[] =
 	{
-		-rectHalfWidth, -1.0f,
-		-rectHalfWidth,  1.0f,
-		 rectHalfWidth,  1.0f,
-		 rectHalfWidth, -1.0f
+        -1.0f, -1.0f,
+        -1.0f,  1.0f,
+         1.0f,  1.0f,
+         1.0f, -1.0f
 	};
 
-	static const GLfloat arrTextureCoords[] =
+    const GLfloat textureCoords[] =
 	{
-		0.0f, 1.0f,
-		0.0f, 0.0f,
-		1.0f, 0.0f,
-		1.0f, 1.0f
+        leftTexCoord,  1.0f,
+        leftTexCoord,  0.0f,
+        rightTexCoord, 0.0f,
+        rightTexCoord, 1.0f
 	};
 
     if (m_vao)
@@ -391,7 +368,7 @@ void TVScreenAnalog::paintGL()
 
         // As these coords are constant, this could be moved into the init method
         m_textureCoordsBuf->bind();
-        m_textureCoordsBuf->allocate(arrTextureCoords, 4 * 2 * sizeof(GL_FLOAT));
+        m_textureCoordsBuf->allocate(textureCoords, 4 * 2 * sizeof(GL_FLOAT));
         m_shader->enableAttributeArray(m_texCoordAttribIndex);
         m_shader->setAttributeBuffer(m_texCoordAttribIndex, GL_FLOAT, 0, 2);
     }
@@ -399,7 +376,7 @@ void TVScreenAnalog::paintGL()
     {
         glVertexAttribPointer(m_vertexAttribIndex, 2, GL_FLOAT, GL_FALSE, 0, vertices);
         glEnableVertexAttribArray(m_vertexAttribIndex);
-        glVertexAttribPointer(m_texCoordAttribIndex, 2, GL_FLOAT, GL_FALSE, 0, arrTextureCoords);
+        glVertexAttribPointer(m_texCoordAttribIndex, 2, GL_FLOAT, GL_FALSE, 0, textureCoords);
         glEnableVertexAttribArray(m_texCoordAttribIndex);
     }
 

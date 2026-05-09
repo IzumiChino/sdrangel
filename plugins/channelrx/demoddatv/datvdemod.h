@@ -49,12 +49,12 @@ public:
 
     virtual void getIdentifier(QString& id) { id = objectName(); }
     virtual QString getIdentifier() const { return objectName(); }
-    virtual void getTitle(QString& title) { title = objectName(); }
+    virtual void getTitle(QString& title) { title = m_settings.m_title; }
     virtual qint64 getCenterFrequency() const { return m_settings.m_centerFrequency; }
     virtual void setCenterFrequency(qint64 frequency);
 
-    virtual QByteArray serialize() const { return QByteArray(); }
-    virtual bool deserialize(const QByteArray& data) { (void) data; return false; }
+    virtual QByteArray serialize() const;
+    virtual bool deserialize(const QByteArray& data);
 
     using BasebandSampleSink::feed;
     virtual void feed(const SampleVector::const_iterator& begin, const SampleVector::const_iterator& end, bool po);

@@ -220,14 +220,42 @@ bool DATVideoRender::preprocessStream()
     m_metaData.Program = "";
     m_metaData.Stream = "";
 
-    if (m_formatCtx->programs && m_formatCtx->programs[m_videoStreamIndex])
+    AVProgram *program = nullptr;
+
+    if (m_formatCtx->programs)
+    {
+        for (unsigned int programIndex = 0; programIndex < m_formatCtx->nb_programs; ++programIndex)
+        {
+            AVProgram *candidate = m_formatCtx->programs[programIndex];
+
+            if (!candidate) {
+                continue;
+            }
+
+            for (unsigned int streamIndex = 0; streamIndex < candidate->nb_stream_indexes; ++streamIndex)
+            {
+                if (candidate->stream_index[streamIndex] == static_cast<unsigned int>(m_videoStreamIndex))
+                {
+                    program = candidate;
+                    break;
+                }
+            }
+
+            if (program) {
+                break;
+            }
+        }
+    }
+
+    if (program)
     {
         buffer = nullptr;
-        av_dict_get_string(m_formatCtx->programs[m_videoStreamIndex]->metadata, &buffer, ':', '\n');
+        av_dict_get_string(program->metadata, &buffer, ':', '\n');
 
         if (buffer != nullptr)
         {
             m_metaData.Program = QString("%1").arg(buffer);
+            av_free(buffer);
         }
     }
 
@@ -238,6 +266,7 @@ bool DATVideoRender::preprocessStream()
     if (buffer != nullptr)
     {
         m_metaData.Stream = QString("%1").arg(buffer);
+        av_free(buffer);
     }
 
     emit onMetaDataChanged(new DataTSMetaData2(m_metaData));

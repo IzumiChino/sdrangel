@@ -20,6 +20,9 @@
 
 
 #include "datvideostream.h"
+
+#include <limits>
+
 #include <stdio.h>
 
 DATVideostream::DATVideostream()
@@ -40,8 +43,17 @@ DATVideostream::~DATVideostream()
     cleanUp();
 }
 
+void DATVideostream::setThreadTimeout(int timeOut)
+{
+    QMutexLocker mutexLocker(&m_mutex);
+    m_threadTimeout = timeOut;
+    m_dataWaitCondition.wakeAll();
+}
+
 void DATVideostream::cleanUp()
 {
+    QMutexLocker mutexLocker(&m_mutex);
+
     if (m_fifo.size() > 0) {
         m_fifo.clear();
     }
@@ -50,9 +62,9 @@ void DATVideostream::cleanUp()
         m_eventLoop.exit();
     }
 
-    m_bytesAvailable = 0;
     m_bytesWaiting = 0;
     m_percentBuffer = 0;
+    m_dataWaitCondition.wakeAll();
 }
 
 void DATVideostream::resetTotalReceived()
@@ -82,24 +94,23 @@ int DATVideostream::pushData(const char * chrData, int intSize)
     m_mutex.lock();
 
     m_packetReceived++;
+    m_fifo.enqueue(QByteArray(chrData, intSize));
     m_bytesWaiting += intSize;
 
-    if (m_bytesWaiting > m_memoryLimit) {
+    while ((m_bytesWaiting > m_memoryLimit) && !m_fifo.isEmpty()) {
         m_bytesWaiting -= m_fifo.dequeue().size();
     }
 
-    m_fifo.enqueue(QByteArray(chrData,intSize));
-    m_bytesAvailable = m_fifo.head().size();
     m_totalReceived += intSize;
+    m_percentBuffer = (100*m_bytesWaiting) / m_memoryLimit;
+    m_percentBuffer = m_percentBuffer > 100 ? 100 : m_percentBuffer;
 
     m_mutex.unlock();
+    m_dataWaitCondition.wakeAll();
 
     if (m_eventLoop.isRunning()) {
         emit dataAvailable();
     }
-
-    m_percentBuffer = (100*m_bytesWaiting) / m_memoryLimit;
-    m_percentBuffer = m_percentBuffer > 100 ? 100 : m_percentBuffer;
 
     if (m_packetReceived % 10 == 1) {
         emit fifoData(m_bytesWaiting, m_percentBuffer, m_totalReceived);
@@ -115,7 +126,8 @@ bool DATVideostream::isSequential() const
 
 qint64  DATVideostream::bytesAvailable() const
 {
-    return m_bytesAvailable;
+    QMutexLocker mutexLocker(&m_mutex);
+    return QIODevice::bytesAvailable() + m_bytesWaiting;
 }
 
 void  DATVideostream::close()
@@ -134,10 +146,8 @@ bool  DATVideostream::open(OpenMode mode)
 
 qint64 DATVideostream::readData(char *data, qint64 len)
 {
-    QByteArray currentArray;
     int effectiveLen = 0;
-    int expectedLen = (int) len;
-    int threadLoop = 0;
+    const int expectedLen = static_cast<int>(std::min<qint64>(len, std::numeric_limits<int>::max()));
 
     if (expectedLen <= 0) {
         return 0;
@@ -147,64 +157,57 @@ qint64 DATVideostream::readData(char *data, qint64 len)
         return 0;
     }
 
-    m_mutex.lock();
+    QMutexLocker mutexLocker(&m_mutex);
 
-    //DATA in FIFO ? -> Waiting for DATA
-    if ((m_fifo.isEmpty()) || (m_fifo.count() < m_minStackSize))
+    while (m_fifo.isEmpty())
     {
-        m_mutex.unlock();
-
-        if (m_multiThreaded == true)
+        if (m_multiThreaded)
         {
-            threadLoop = 0;
+            if (m_threadTimeout == 0) {
+                return -1;
+            }
 
-            while ((m_fifo.isEmpty()) || (m_fifo.count() < m_minStackSize))
+            if (m_threadTimeout > 0)
             {
-                QThread::msleep(5);
-                threadLoop++;
-
-                if (m_threadTimeout >= 0)
-                {
-                    if (threadLoop*5 > m_threadTimeout) {
-                        return -1;
-                    }
+                if (!m_dataWaitCondition.wait(&m_mutex, m_threadTimeout) && m_fifo.isEmpty()) {
+                    return -1;
                 }
+            }
+            else
+            {
+                m_dataWaitCondition.wait(&m_mutex);
             }
         }
         else
         {
+            mutexLocker.unlock();
             m_eventLoop.exec();
+            mutexLocker.relock();
+
+            if (m_fifo.isEmpty()) {
+                return 0;
+            }
+        }
+    }
+
+    while ((effectiveLen < expectedLen) && !m_fifo.isEmpty())
+    {
+        QByteArray& currentArray = m_fifo.head();
+        const int chunkLen = std::min(expectedLen - effectiveLen, static_cast<int>(currentArray.size()));
+        std::copy(
+            currentArray.constData(),
+            currentArray.constData() + chunkLen,
+            data + effectiveLen
+        );
+
+        if (chunkLen == currentArray.size()) {
+            m_fifo.dequeue();
+        } else {
+            currentArray.remove(0, chunkLen);
         }
 
-        m_mutex.lock();
-    }
-
-    //Read DATA
-    effectiveLen = m_fifo.head().size();
-
-    if (expectedLen < effectiveLen)
-    {
-        //Partial Read
-        currentArray = m_fifo.head();
-        std::copy(
-            currentArray.constData(),
-            currentArray.constData() + expectedLen,
-            data
-        );
-        m_fifo.head().remove(0, expectedLen);
-        effectiveLen = expectedLen;
-        m_bytesWaiting -= expectedLen;
-    }
-    else
-    {
-        //Complete Read
-        currentArray = m_fifo.dequeue();
-        std::copy(
-            currentArray.constData(),
-            currentArray.constData() + effectiveLen,
-            data
-        );
-        m_bytesWaiting -= effectiveLen;
+        effectiveLen += chunkLen;
+        m_bytesWaiting -= chunkLen;
     }
 
     m_percentBuffer = (100*m_bytesWaiting) / m_memoryLimit;
@@ -213,11 +216,6 @@ qint64 DATVideostream::readData(char *data, qint64 len)
     if (m_packetReceived % 10 == 0) {
         emit fifoData(m_bytesWaiting, m_percentBuffer, m_totalReceived);
     }
-
-    //Next available DATA
-    m_bytesAvailable = m_fifo.head().size();
-
-    m_mutex.unlock();
 
     return (qint64) effectiveLen;
 }

@@ -17,6 +17,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <QtGlobal>
+#include <cmath>
 #include <QDebug>
 #include <QFontDatabase>
 #include <QMouseEvent>
@@ -27,6 +28,39 @@
 #include <algorithm>
 
 #include "glscope.h"
+
+namespace {
+bool getTraceWindow(int traceSize, int timeOfsProMill, int timeBase, int& start, int& end)
+{
+    start = 0;
+    end = 0;
+
+    if ((traceSize < 2) || (timeBase < 1)) {
+        return false;
+    }
+
+    start = (timeOfsProMill / 1000.0f) * traceSize;
+
+    if (start < 0) {
+        start = 0;
+    } else if (start >= traceSize) {
+        start = traceSize - 1;
+    }
+
+    end = std::min(start + std::max(traceSize / timeBase, 2), traceSize);
+
+    if ((end - start) < 2)
+    {
+        if (end >= 2) {
+            start = end - 2;
+        } else {
+            return false;
+        }
+    }
+
+    return (start >= 0) && (end <= traceSize) && ((end - start) >= 2);
+}
+}
 
 const GLfloat GLScope::m_q3RadiiConst[] = {
     0.0f,  0.5f,  1.0f,  0.5f,  // 0
@@ -348,20 +382,16 @@ void GLScope::paintGL()
         }
 
         // paint trace #1
-        if (m_traceSize > 0)
+        int start = 0;
+        int end = 0;
+
+        if (getTraceWindow(m_traceSize, m_timeOfsProMill, m_timeBase, start, end))
         {
             const float *trace = (*m_traces)[0];
             const GLScopeSettings::TraceData &traceData = (*m_tracesData)[0];
 
             if (traceData.m_viewTrace)
             {
-                int start = (m_timeOfsProMill / 1000.0) * m_traceSize;
-                int end = std::min(start + m_traceSize / m_timeBase, m_traceSize);
-
-                if (end - start < 2) {
-                    start--;
-                }
-
                 float rectX = m_glScopeRect1.x();
                 float rectY = m_glScopeRect1.y() + m_glScopeRect1.height() / 2.0f;
                 float rectW = m_glScopeRect1.width() * (float)m_timeBase / (float)(m_traceSize - 1);
@@ -432,15 +462,11 @@ void GLScope::paintGL()
         drawRectGrid2();
 
         // paint traces #1..n
-        if (m_traceSize > 0)
+        int start = 0;
+        int end = 0;
+
+        if (getTraceWindow(m_traceSize, m_timeOfsProMill, m_timeBase, start, end))
         {
-            int start = (m_timeOfsProMill / 1000.0) * m_traceSize;
-            int end = std::min(start + m_traceSize / m_timeBase, m_traceSize);
-
-            if (end - start < 2) {
-                start--;
-            }
-
             for (unsigned int i = 1; i < m_traces->size(); i++)
             {
                 const float *trace = (*m_traces)[i];
@@ -651,15 +677,11 @@ void GLScope::paintGL()
         }
 
         // paint all traces
-        if (m_traceSize > 0)
+        int start = 0;
+        int end = 0;
+
+        if (getTraceWindow(m_traceSize, m_timeOfsProMill, m_timeBase, start, end))
         {
-            int start = (m_timeOfsProMill / 1000.0) * m_traceSize;
-            int end = std::min(start + m_traceSize / m_timeBase, m_traceSize);
-
-            if (end - start < 2) {
-                start--;
-            }
-
             for (unsigned int i = 0; i < m_traces->size(); i++)
             {
                 const float *trace = (*m_traces)[i];
@@ -748,15 +770,12 @@ void GLScope::paintGL()
 
         // paint polar traces
 
-        if (m_traceSize > 0)
+        int polarStart = 0;
+        int polarEnd = 0;
+
+        if (getTraceWindow(m_traceSize, m_timeOfsProMill, m_timeBase, polarStart, polarEnd))
         {
-            int start = (m_timeOfsProMill / 1000.0) * m_traceSize;
-            int end = std::min(start + m_traceSize / m_timeBase, m_traceSize);
-
-            if (end - start < 2)
-                start--;
-
-            //GLfloat q3[2*(end - start)];
+            //GLfloat q3[2*(polarEnd - polarStart)];
             GLfloat *q3 = m_q3Polar.m_array;
             const float *trace0 = (*m_traces)[0];
 
@@ -771,7 +790,7 @@ void GLScope::paintGL()
             polarConversion &= m_displayPolGrid;
 
             if (!polarConversion) { // When there is no polar conversion X values are fixed
-                memcpy(q3, &(trace0[2*start + 1]), (2*(end-start) - 1)*sizeof(float)); // copy X values
+                memcpy(q3, &(trace0[2*polarStart + 1]), (2*(polarEnd-polarStart) - 1)*sizeof(float)); // copy X values
             } // TODO: with polar conversion X can be converted to fixed sin(theta) and cos(theta)
 
             for (unsigned int i = 1; i < m_traces->size(); i++)
@@ -788,7 +807,7 @@ void GLScope::paintGL()
                     bool positiveProjection = m_projectionTypes && (i < m_projectionTypes->size()) ?
                         isPositiveProjection((*m_projectionTypes)[i]) : false;
 
-                    for (int j = start; j < end; j++)
+                    for (int j = polarStart; j < polarEnd; j++)
                     {
                         float r;
                         if (positiveProjection) {
@@ -799,16 +818,16 @@ void GLScope::paintGL()
                         float theta = M_PI*trace0[2*j + 1]; // TODO: fixed X to theta conversion (see above)
                         float x = r*cos(theta);
                         float y = r*sin(theta);
-                        q3[2*(j-start)] = x;
-                        q3[2*(j-start) + 1] = y;
+                        q3[2*(j-polarStart)] = x;
+                        q3[2*(j-polarStart) + 1] = y;
                     }
                 }
                 else
                 {
-                    for (int j = start; j < end; j++)
+                    for (int j = polarStart; j < polarEnd; j++)
                     {
                         float y = trace[2*j + 1];
-                        q3[2*(j-start) + 1] = y;
+                        q3[2*(j-polarStart) + 1] = y;
                     }
                 }
 
@@ -826,17 +845,17 @@ void GLScope::paintGL()
                 if (i == 1) // Y1 in rainbow color
                 {
                     if (m_displayXYPoints) {
-                        m_glShaderColors.drawPoints(mat, q3, m_q3Colors.m_array, m_displayTraceIntensity / 100.0f, end - start);
+                        m_glShaderColors.drawPoints(mat, q3, m_q3Colors.m_array, m_displayTraceIntensity / 100.0f, polarEnd - polarStart);
                     } else {
-                        m_glShaderColors.drawPolyline(mat, q3, m_q3Colors.m_array, m_displayTraceIntensity / 100.0f, end - start);
+                        m_glShaderColors.drawPolyline(mat, q3, m_q3Colors.m_array, m_displayTraceIntensity / 100.0f, polarEnd - polarStart);
                     }
                 }
                 else
                 {
                     if (m_displayXYPoints) {
-                        m_glShaderSimple.drawPoints(mat, color, q3, end - start);
+                        m_glShaderSimple.drawPoints(mat, color, q3, polarEnd - polarStart);
                     } else {
-                        m_glShaderSimple.drawPolyline(mat, color, q3, end - start);
+                        m_glShaderSimple.drawPolyline(mat, color, q3, polarEnd - polarStart);
                     }
                 }
             } // XY polar display
@@ -1089,9 +1108,23 @@ void GLScope::updateDisplay()
 void GLScope::applyConfig()
 {
     QFontMetrics fm(font());
-    //float t_start = ((m_timeOfsProMill / 1000.0) * ((float) m_traceSize / m_sampleRate)) - ((float) m_triggerPre / m_sampleRate);
-    float t_start = (((m_timeOfsProMill / 1000.0f) * (float)m_traceSize) / m_sampleRate) - ((float)m_triggerPre / m_sampleRate);
-    float t_len = ((float)m_traceSize / m_sampleRate) / (float)m_timeBase;
+    float t_start = 0.0f;
+    float t_len = 1.0f;
+    bool validTimeScale = (m_sampleRate > 0) && (m_traceSize > 0) && (m_timeBase > 0);
+
+    if (validTimeScale)
+    {
+        t_start = (((m_timeOfsProMill / 1000.0f) * (float)m_traceSize) / m_sampleRate) - ((float)m_triggerPre / m_sampleRate);
+        t_len = ((float)m_traceSize / m_sampleRate) / (float)m_timeBase;
+
+        if (!std::isfinite(t_start) || !std::isfinite(t_len) || (t_len <= 0.0f)) {
+            validTimeScale = false;
+            t_start = 0.0f;
+            t_len = 1.0f;
+        }
+    }
+
+    (void) validTimeScale;
 
     // scales
 
@@ -1141,13 +1174,14 @@ void GLScope::applyConfig()
     m_q3TickX1.allocate(4 * m_x1Scale.getTickList().count());
     m_q3TickX2.allocate(4 * m_x2Scale.getTickList().count());
 
-    int start = (m_timeOfsProMill / 1000.0) * m_traceSize;
-    int end = std::min(start + m_traceSize / m_timeBase, m_traceSize);
+    int start = 0;
+    int end = 0;
 
-    if (end - start < 2)
-        start--;
-
-    m_q3Polar.allocate(2 * (end - start));
+    if (getTraceWindow(m_traceSize, m_timeOfsProMill, m_timeBase, start, end)) {
+        m_q3Polar.allocate(2 * (end - start));
+    } else {
+        m_q3Polar.allocate(0);
+    }
 }
 
 void GLScope::setUniqueDisplays()
@@ -1894,10 +1928,23 @@ void GLScope::setPolarDisplays()
 void GLScope::setYScale(ScaleEngine &scale, uint32_t highlightedTraceIndex)
 {
     GLScopeSettings::TraceData &traceData = (*m_tracesData)[highlightedTraceIndex];
+
+    if (!std::isfinite(traceData.m_amp) || (traceData.m_amp <= 0.0f) || !std::isfinite(traceData.m_ofs))
+    {
+        scale.setRange(Unit::None, -1.0f, 1.0f);
+        return;
+    }
+
     double amp_range = 2.0 / traceData.m_amp;
     double amp_ofs = traceData.m_ofs;
     double pow_floor = -100.0 + traceData.m_ofs * 100.0;
     double pow_range = 100.0 / traceData.m_amp;
+
+    if (!std::isfinite(amp_range) || !std::isfinite(amp_ofs) || !std::isfinite(pow_floor) || !std::isfinite(pow_range))
+    {
+        scale.setRange(Unit::None, -1.0f, 1.0f);
+        return;
+    }
 
     switch (traceData.m_projectionType)
     {
