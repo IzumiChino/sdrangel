@@ -133,6 +133,14 @@ void LocalSinkSink::start(DeviceSampleSource *deviceSource)
     //     m_sinkWorker->setDeviceSampleFifo(deviceSource->getSampleFifo());
     // }
 
+    // QObject::connect(
+    //     &m_sampleFifo,
+    //     &SampleSinkFifo::dataReady,
+    //     m_sinkWorker,
+    //     &LocalSinkWorker::handleData,
+    //     Qt::QueuedConnection
+    // );
+
     // startWorker();
     m_running = true;
 }
@@ -142,6 +150,13 @@ void LocalSinkSink::stop()
     qDebug("LocalSinkSink::stop");
 
     // TODO: We'll see later if a worker is really needed
+    // QObject::disconnect(
+    //     &m_sampleFifo,
+    //     &SampleSinkFifo::dataReady,
+    //     m_sinkWorker,
+    //     &LocalSinkWorker::handleData
+    // );
+
     // if (m_sinkWorker != 0)
     // {
     //     stopWorker();
