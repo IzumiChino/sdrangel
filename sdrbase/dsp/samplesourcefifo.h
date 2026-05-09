@@ -42,19 +42,19 @@ public:
     SampleVector& getData() { return m_core.data(); }
     void read(
         unsigned int amount,
-		unsigned int& ipart1Begin, unsigned int& ipart1End,
-		unsigned int& ipart2Begin, unsigned int& ipart2End
+        unsigned int& ipart1Begin, unsigned int& ipart1End, // first part offsets where to read
+        unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
     );
     void write(
         unsigned int amount,
-		unsigned int& ipart1Begin, unsigned int& ipart1End,
-		unsigned int& ipart2Begin, unsigned int& ipart2End
+        unsigned int& ipart1Begin, unsigned int& ipart1End, // first part offsets where to write
+        unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
     );
     unsigned int remainder()
     {
         return m_core.remainder();
     }
-    /** returns ratio of off-centre over buffer size with sign: negative=read lags, positive=read leads */
+    /** returns ratio of off center over buffer size with sign: negative read lags and positive read leads */
     float getRWBalance() const
     {
         return m_core.getRWBalance();

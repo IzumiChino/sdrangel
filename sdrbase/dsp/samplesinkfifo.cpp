@@ -22,6 +22,8 @@
 
 #include "maincore.h"
 
+//#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
 void SampleSinkFifo::reset()
 {
     m_suppressed = -1;
@@ -81,6 +83,7 @@ unsigned int SampleSinkFifo::write(const quint8* data, unsigned int count)
     }
 
     const Sample* begin = reinterpret_cast<const Sample*>(data);
+    //count /= sizeof(Sample);
     count /= sizeof(Sample);
     const unsigned int total = m_core.write(begin, count);
     const bool notifyDataReady = total > 0;
@@ -336,5 +339,5 @@ unsigned int SampleSinkFifo::readCommit(unsigned int count)
 
 unsigned int SampleSinkFifo::getSizePolicy(unsigned int sampleRate)
 {
-    return (sampleRate / 100) * 64; // 0.64 s
+    return (sampleRate / 100) * 64; // .64s
 }

@@ -91,5 +91,5 @@ void SampleSourceFifo::write(
 
 unsigned int SampleSourceFifo::getSizePolicy(unsigned int sampleRate)
 {
-    return (sampleRate / 100) * 64; // 0.64 s
+    return (sampleRate / 100) * 64; // .64s
 }
