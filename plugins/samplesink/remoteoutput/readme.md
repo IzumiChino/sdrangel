@@ -39,6 +39,8 @@ This is the center frequency in kHz of the remote instance device.
 
 This is the remote instance baseband sample rate. It is normally equal to the system sample rate (2).
 
+For local software-only testing you can enable the Manual SR override and enter a numeric value with an explicit unit (`S/s`, `kS/s` or `MS/s`). The entered value is clamped to a safe range before it is applied to the stream metadata and internal FIFOs.
+
 <h3>5: remote instance device set index</h3>
 
 This is the device set index in the remote instance to which the stream is connected to. Use this value to properly address the API to get status.

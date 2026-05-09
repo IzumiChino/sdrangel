@@ -17,9 +17,13 @@
 // along with this program. If not, see <http://www.gnu.org/licenses/>.          //
 ///////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
+
 #include <QDebug>
 #include <QTime>
 #include <QDateTime>
+#include <QDoubleValidator>
+#include <QLocale>
 #include <QString>
 #include <QMessageBox>
 
@@ -38,6 +42,56 @@
 #include "device/deviceuiset.h"
 #include "remoteoutputgui.h"
 
+namespace {
+
+quint32 manualSampleRateUnitScale(int unitIndex)
+{
+    switch (unitIndex)
+    {
+    case 2:
+        return 1000000U;
+    case 1:
+        return 1000U;
+    default:
+        return 1U;
+    }
+}
+
+int bestManualSampleRateUnit(quint32 sampleRate)
+{
+    if (sampleRate >= 1000000U) {
+        return 2;
+    }
+
+    if (sampleRate >= 1000U) {
+        return 1;
+    }
+
+    return 0;
+}
+
+QString formatManualSampleRateValue(double value, int decimals)
+{
+    QString text = QLocale().toString(value, 'f', decimals);
+
+    if (decimals > 0)
+    {
+        const QString decimalPoint = QLocale().decimalPoint();
+
+        while (text.endsWith('0')) {
+            text.chop(1);
+        }
+
+        if (text.endsWith(decimalPoint)) {
+            text.chop(1);
+        }
+    }
+
+    return text;
+}
+
+} // namespace
+
 RemoteOutputSinkGui::RemoteOutputSinkGui(DeviceUISet *deviceUISet, QWidget* parent) :
 	DeviceGUI(parent),
 	ui(new Ui::RemoteOutputGui),
@@ -50,7 +104,8 @@ RemoteOutputSinkGui::RemoteOutputSinkGui(DeviceUISet *deviceUISet, QWidget* pare
 	m_lastEngineState(DeviceAPI::StNotStarted),
 	m_doApplySettings(true),
 	m_forceSettings(true),
-    m_remoteAPIConnected(false)
+    m_remoteAPIConnected(false),
+    m_remoteUsesDeviceReport(false)
 {
     m_deviceUISet = deviceUISet;
     setAttribute(Qt::WA_DeleteOnClose, true);
@@ -68,6 +123,9 @@ RemoteOutputSinkGui::RemoteOutputSinkGui(DeviceUISet *deviceUISet, QWidget* pare
     sizeToContents();
     getContents()->setStyleSheet("#RemoteOutputGui { background-color: rgb(64, 64, 64); }");
     m_helpURL = "plugins/samplesink/remoteoutput/readme.md";
+    auto *manualSampleRateValidator = new QDoubleValidator(0.001, RemoteOutputSettings::m_maxSampleRate, 3, ui->manualSampleRate);
+    manualSampleRateValidator->setNotation(QDoubleValidator::StandardNotation);
+    ui->manualSampleRate->setValidator(manualSampleRateValidator);
 
 	connect(&(m_deviceUISet->m_deviceAPI->getMasterTimer()), SIGNAL(timeout()), this, SLOT(tick()));
 	connect(&m_updateTimer, SIGNAL(timeout()), this, SLOT(updateHardware()));
@@ -77,6 +135,7 @@ RemoteOutputSinkGui::RemoteOutputSinkGui(DeviceUISet *deviceUISet, QWidget* pare
 	m_remoteOutput = (RemoteOutput*) m_deviceUISet->m_deviceAPI->getSampleSink();
 
 	connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()), Qt::QueuedConnection);
+    m_remoteOutput->setMessageQueueToGUI(&m_inputMessageQueue);
 
 	m_deviceUISet->getSpectrum()->setCenterFrequency(m_deviceCenterFrequency);
 
@@ -181,6 +240,27 @@ bool RemoteOutputSinkGui::handleMessage(const Message& message)
         displayRemoteFixedData(report.getData());
         return true;
     }
+    else if (RemoteOutput::MsgReportRemoteStatus::match(message))
+    {
+        const auto& report = (const RemoteOutput::MsgReportRemoteStatus&) message;
+        m_remoteAPIConnected = true;
+        m_remoteUsesDeviceReport = report.usesDeviceReport();
+        setChannelIndexEnabled(!m_remoteUsesDeviceReport);
+        ui->statusText->setText(report.getMessage());
+
+        if (report.getCenterFrequency() != 0)
+        {
+            m_deviceCenterFrequency = report.getCenterFrequency();
+            m_deviceUISet->getSpectrum()->setCenterFrequency(m_deviceCenterFrequency);
+            ui->centerFrequency->setText(QString("%L1").arg(m_deviceCenterFrequency));
+        }
+
+        if (report.getSampleRate() > 0) {
+            ui->remoteRateText->setText(tr("%1k").arg((float) report.getSampleRate() / 1000));
+        }
+
+        return true;
+    }
 	else
 	{
 		return false;
@@ -225,6 +305,10 @@ void RemoteOutputSinkGui::displaySettings()
     ui->centerFrequency->setText(QString("%L1").arg(m_deviceCenterFrequency));
     ui->nbFECBlocks->setValue(m_settings.m_nbFECBlocks);
     ui->nbTxBytes->setCurrentIndex(log2(m_settings.m_nbTxBytes));
+    ui->manualSampleRateOverride->setChecked(m_settings.m_overrideRemoteSampleRate);
+    displayManualSampleRate(m_settings.m_sampleRate);
+    ui->manualSampleRate->setEnabled(m_settings.m_overrideRemoteSampleRate);
+    ui->manualSampleRateUnit->setEnabled(m_settings.m_overrideRemoteSampleRate);
 
     QString s0 = QString::number(128 + m_settings.m_nbFECBlocks, 'f', 0);
     QString s1 = QString::number(m_settings.m_nbFECBlocks, 'f', 0);
@@ -236,7 +320,17 @@ void RemoteOutputSinkGui::displaySettings()
     ui->apiPort->setText(tr("%1").arg(m_settings.m_apiPort));
     ui->dataAddress->setText(m_settings.m_dataAddress);
     ui->dataPort->setText(tr("%1").arg(m_settings.m_dataPort));
+    setChannelIndexEnabled(!m_remoteUsesDeviceReport);
     blockApplySettings(false);
+}
+
+void RemoteOutputSinkGui::setChannelIndexEnabled(bool enabled)
+{
+    ui->channelIndexLabel->setEnabled(true);
+    ui->channelIndex->setEnabled(true);
+    ui->channelIndex->setToolTip(enabled ?
+        tr("Channel index (for SDRangel)") :
+        tr("Ignored when the remote receiver is a RemoteInput device"));
 }
 
 void RemoteOutputSinkGui::sendSettings()
@@ -333,6 +427,30 @@ void RemoteOutputSinkGui::on_nbTxBytes_currentIndexChanged(int index)
     m_settings.m_nbTxBytes = 1 << index;
     m_settingsKeys.append("nbTxBytes");
     sendSettings();
+}
+
+void RemoteOutputSinkGui::on_manualSampleRateOverride_toggled(bool checked)
+{
+    ui->manualSampleRate->setEnabled(checked);
+    ui->manualSampleRateUnit->setEnabled(checked);
+    m_settings.m_overrideRemoteSampleRate = checked;
+    m_settingsKeys.append("overrideRemoteSampleRate");
+
+    if (checked)
+    {
+        if (!applyManualSampleRateSetting()) {
+            sendSettings();
+        }
+    }
+    else
+    {
+        sendSettings();
+    }
+}
+
+void RemoteOutputSinkGui::on_manualSampleRate_returnPressed()
+{
+    applyManualSampleRateSetting();
 }
 
 void RemoteOutputSinkGui::on_apiAddress_returnPressed()
@@ -594,6 +712,8 @@ void RemoteOutputSinkGui::makeUIConnections()
     QObject::connect(ui->deviceIndex, &QLineEdit::returnPressed, this, &RemoteOutputSinkGui::on_deviceIndex_returnPressed);
     QObject::connect(ui->channelIndex, &QLineEdit::returnPressed, this, &RemoteOutputSinkGui::on_channelIndex_returnPressed);
     QObject::connect(ui->nbTxBytes, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &RemoteOutputSinkGui::on_nbTxBytes_currentIndexChanged);
+    QObject::connect(ui->manualSampleRateOverride, &QCheckBox::toggled, this, &RemoteOutputSinkGui::on_manualSampleRateOverride_toggled);
+    QObject::connect(ui->manualSampleRate, &QLineEdit::returnPressed, this, &RemoteOutputSinkGui::on_manualSampleRate_returnPressed);
     QObject::connect(ui->apiAddress, &QLineEdit::returnPressed, this, &RemoteOutputSinkGui::on_apiAddress_returnPressed);
     QObject::connect(ui->apiPort, &QLineEdit::returnPressed, this, &RemoteOutputSinkGui::on_apiPort_returnPressed);
     QObject::connect(ui->dataAddress, &QLineEdit::returnPressed, this, &RemoteOutputSinkGui::on_dataAddress_returnPressed);
@@ -602,4 +722,38 @@ void RemoteOutputSinkGui::makeUIConnections()
     QObject::connect(ui->dataApplyButton, &QPushButton::clicked, this, &RemoteOutputSinkGui::on_dataApplyButton_clicked);
     QObject::connect(ui->startStop, &ButtonSwitch::toggled, this, &RemoteOutputSinkGui::on_startStop_toggled);
     QObject::connect(ui->eventCountsReset, &QPushButton::clicked, this, &RemoteOutputSinkGui::on_eventCountsReset_clicked);
+}
+
+void RemoteOutputSinkGui::displayManualSampleRate(quint32 sampleRate, int preferredUnitIndex)
+{
+    const int unitIndex = preferredUnitIndex >= 0 ? preferredUnitIndex : bestManualSampleRateUnit(sampleRate);
+    const quint32 unitScale = manualSampleRateUnitScale(unitIndex);
+    const double unitValue = static_cast<double>(sampleRate) / unitScale;
+    const int decimals = (unitScale == 1U) || ((sampleRate % unitScale) == 0U) ? 0 : 3;
+
+    ui->manualSampleRateUnit->setCurrentIndex(unitIndex);
+    ui->manualSampleRate->setText(formatManualSampleRateValue(unitValue, decimals));
+}
+
+bool RemoteOutputSinkGui::applyManualSampleRateSetting()
+{
+    bool dataOk = false;
+    const double unitValue = QLocale().toDouble(ui->manualSampleRate->text(), &dataOk);
+
+    if ((!dataOk) || (unitValue <= 0.0))
+    {
+        displayManualSampleRate(m_settings.m_sampleRate, ui->manualSampleRateUnit->currentIndex());
+        return false;
+    }
+
+    const quint32 unitScale = manualSampleRateUnitScale(ui->manualSampleRateUnit->currentIndex());
+    const double scaledSampleRate = unitValue * unitScale;
+    const double limitedSampleRate = std::min(scaledSampleRate, static_cast<double>(RemoteOutputSettings::m_maxSampleRate));
+    const quint32 sampleRate = RemoteOutputSettings::clampSampleRate(static_cast<quint32>(qRound64(limitedSampleRate)));
+
+    m_settings.m_sampleRate = sampleRate;
+    m_settingsKeys.append("sampleRate");
+    displayManualSampleRate(m_settings.m_sampleRate, ui->manualSampleRateUnit->currentIndex());
+    sendSettings();
+    return true;
 }

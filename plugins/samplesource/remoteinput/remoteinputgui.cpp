@@ -46,6 +46,7 @@ RemoteInputGui::RemoteInputGui(DeviceUISet *deviceUISet, QWidget* parent) :
 	ui(new Ui::RemoteInputGui),
 	m_settings(),
 	m_sampleSource(0),
+    m_remoteControlsAvailable(false),
 	m_acquisition(false),
 	m_streamSampleRate(0),
 	m_streamCenterFrequency(0),
@@ -175,6 +176,7 @@ bool RemoteInputGui::handleMessage(const Message& message)
         qDebug("RemoteInputGui::handleMessage: RemoteInput::MsgConfigureRemoteChannel");
         const RemoteInput::MsgConfigureRemoteChannel& cfg = (RemoteInput::MsgConfigureRemoteChannel&) message;
         m_remoteChannelSettings = cfg.getSettings();
+        m_remoteControlsAvailable = true;
         blockApplySettings(true);
         displayRemoteSettings();
         blockApplySettings(false);
@@ -235,14 +237,23 @@ bool RemoteInputGui::handleMessage(const Message& message)
         ui->apiAddressLabel->setStyleSheet("QLabel { background-color : green; }");
         const RemoteInput::MsgReportRemoteFixedData& report = (const RemoteInput::MsgReportRemoteFixedData&) message;
         displayRemoteFixedData(report.getData());
-        ui->statusText->setText("OK");
         return true;
     }
     else if (RemoteInput::MsgReportRemoteAPIError::match(message))
     {
         ui->apiAddressLabel->setStyleSheet("QLabel { background:rgb(79,79,79); }");
+        m_remoteControlsAvailable = false;
+        setRemoteControlsEnabled(false);
         const RemoteInput::MsgReportRemoteAPIError& report = (const RemoteInput::MsgReportRemoteAPIError&) message;
         ui->statusText->setText(QString(report.getMessage()));
+        return true;
+    }
+    else if (RemoteInput::MsgReportRemoteControlStatus::match(message))
+    {
+        const auto& report = (const RemoteInput::MsgReportRemoteControlStatus&) message;
+        m_remoteControlsAvailable = report.getControlsAvailable();
+        setRemoteControlsEnabled(m_remoteControlsAvailable);
+        ui->statusText->setText(report.getMessage());
         return true;
     }
 	else
@@ -317,6 +328,7 @@ void RemoteInputGui::displaySettings()
 
 	ui->dcOffset->setChecked(m_settings.m_dcBlock);
 	ui->iqImbalance->setChecked(m_settings.m_iqCorrection);
+    setRemoteControlsEnabled(m_remoteControlsAvailable);
 
 	blockApplySettings(false);
 }
@@ -366,8 +378,19 @@ void RemoteInputGui::applyPosition()
     applyRemoteSettings();
 }
 
+void RemoteInputGui::setRemoteControlsEnabled(bool enabled)
+{
+    ui->remoteDeviceFrequency->setEnabled(enabled);
+    ui->decimationFactor->setEnabled(enabled);
+    ui->position->setEnabled(enabled);
+}
+
 void RemoteInputGui::applyRemoteSettings()
 {
+    if (!m_remoteControlsAvailable) {
+        return;
+    }
+
     if (!m_remoteUpdateTimer.isActive()) {
         m_remoteUpdateTimer.start(100);
     }
@@ -654,42 +677,33 @@ void RemoteInputGui::updateRemote()
 
 void RemoteInputGui::updateStatus()
 {
-    if (m_sampleSource->isStreaming())
+    int state = m_deviceUISet->m_deviceAPI->state();
+
+    if (m_lastEngineState != state)
     {
-        int state = m_deviceUISet->m_deviceAPI->state();
-
-        if (m_lastEngineState != state)
+        switch(state)
         {
-            switch(state)
-            {
-                case DeviceAPI::StNotStarted:
-                    ui->startStop->setStyleSheet("QToolButton { background:rgb(79,79,79); }");
-                    break;
-                case DeviceAPI::StIdle:
-                    ui->startStop->setStyleSheet("QToolButton { background-color : blue; }");
-                    break;
-                case DeviceAPI::StRunning:
-                    ui->startStop->setStyleSheet("QToolButton { background-color : green; }");
-                    break;
-                case DeviceAPI::StError:
-                    ui->startStop->setStyleSheet("QToolButton { background-color : red; }");
-                    QMessageBox::information(this, tr("Message"), m_deviceUISet->m_deviceAPI->errorMessage());
-                    break;
-                default:
-                    break;
-            }
-
-            m_lastEngineState = state;
+            case DeviceAPI::StNotStarted:
+                ui->startStop->setStyleSheet("QToolButton { background:rgb(79,79,79); }");
+                break;
+            case DeviceAPI::StIdle:
+                ui->startStop->setStyleSheet("QToolButton { background-color : blue; }");
+                break;
+            case DeviceAPI::StRunning:
+                ui->startStop->setStyleSheet("QToolButton { background-color : green; }");
+                break;
+            case DeviceAPI::StError:
+                ui->startStop->setStyleSheet("QToolButton { background-color : red; }");
+                QMessageBox::information(this, tr("Message"), m_deviceUISet->m_deviceAPI->errorMessage());
+                break;
+            default:
+                break;
         }
 
-        ui->startStop->setEnabled(true);
+        m_lastEngineState = state;
     }
-    else
-    {
-        ui->startStop->setStyleSheet("QToolButton { background:rgb(79,79,79); }");
-        ui->startStop->setChecked(false);
-        ui->startStop->setEnabled(false);
-    }
+
+    ui->startStop->setEnabled(state != DeviceAPI::StNotStarted);
 }
 
 void RemoteInputGui::openDeviceSettingsDialog(const QPoint& p)

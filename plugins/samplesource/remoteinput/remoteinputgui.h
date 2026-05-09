@@ -58,6 +58,7 @@ private:
 	RemoteInput::RemoteChannelSettings m_remoteChannelSettings;
 	double m_remoteShiftFrequencyFactor;  //!< Remote channel frequency shift factor
 	RemoteInput* m_sampleSource;
+    bool m_remoteControlsAvailable;
     bool m_acquisition;
     int m_streamSampleRate;          //!< Sample rate of received stream
     quint64 m_streamCenterFrequency; //!< Center frequency of received stream
@@ -105,6 +106,7 @@ private:
 	void displaySettings();
 	void displayRemoteSettings();
 	void displayRemoteShift();
+	void setRemoteControlsEnabled(bool enabled);
 	void displayTime();
 	void displayRemoteFixedData(const RemoteInput::MsgReportRemoteFixedData::RemoteData& remoteData);
     void sendSettings();

@@ -34,7 +34,7 @@
 
 RemoteSinkSender::RemoteSinkSender() :
     m_running(false),
-    m_fifo(20, this),
+    m_fifo(20),
     m_address(QHostAddress::LocalHost),
     m_socket(this)
 {
@@ -51,13 +51,9 @@ RemoteSinkSender::~RemoteSinkSender()
 bool RemoteSinkSender::startWork()
 {
     qDebug("RemoteSinkSender::startWork");
-    QObject::connect(
-        &m_fifo,
-        &RemoteSinkFifo::dataBlockServed,
-        this,
-        &RemoteSinkSender::handleData,
-        Qt::QueuedConnection
-    );
+    m_fifo.setDataBlockServedCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
     connect(thread(), SIGNAL(started()), this, SLOT(started()));
     connect(thread(), SIGNAL(finished()), this, SLOT(finished()));
     m_running = true;
@@ -72,12 +68,7 @@ void RemoteSinkSender::started()
 void RemoteSinkSender::stopWork()
 {
     qDebug("RemoteSinkSender::stopWork");
-    QObject::disconnect(
-        &m_fifo,
-        &RemoteSinkFifo::dataBlockServed,
-        this,
-        &RemoteSinkSender::handleData
-    );
+    m_fifo.setDataBlockServedCallback({});
 }
 
 void RemoteSinkSender::finished()

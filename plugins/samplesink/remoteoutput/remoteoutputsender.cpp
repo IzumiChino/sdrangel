@@ -29,6 +29,9 @@
 #include <boost/crc.hpp>
 #include <boost/cstdint.hpp>
 
+#include <QDebug>
+#include <QNetworkProxy>
+#include <QThread>
 #include <QUdpSocket>
 
 #include "cm256cc/cm256.h"
@@ -37,27 +40,59 @@
 #include "remoteoutputsender.h"
 
 RemoteOutputSender::RemoteOutputSender() :
-    m_fifo(20, this),
-    m_udpSocket(nullptr),
+    m_running(false),
+    m_socketReady(false),
+    m_socketErrorReported(false),
+    m_fifo(20),
+    m_udpSocket(this),
     m_remotePort(9090)
 {
     qDebug("RemoteOutputSender::RemoteOutputSender");
+    m_udpSocket.setProxy(QNetworkProxy::NoProxy);
     m_cm256p = m_cm256.isInitialized() ? &m_cm256 : nullptr;
-    m_udpSocket = new QUdpSocket(this);
-
-    QObject::connect(
-        &m_fifo,
-        &RemoteOutputFifo::dataBlockServed,
-        this,
-        &RemoteOutputSender::handleData,
-        Qt::QueuedConnection
-    );
 }
 
 RemoteOutputSender::~RemoteOutputSender()
 {
     qDebug("RemoteOutputSender::~RemoteOutputSender");
-    delete m_udpSocket;
+    m_udpSocket.close();
+}
+
+bool RemoteOutputSender::startWork()
+{
+    qDebug("RemoteOutputSender::startWork");
+
+    if (m_running) {
+        return true;
+    }
+
+    m_fifo.setDataBlockServedCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
+
+    m_running = true;
+    m_socketErrorReported = false;
+    ensureSocketReady();
+    return m_running;
+}
+
+void RemoteOutputSender::stopWork()
+{
+    qDebug("RemoteOutputSender::stopWork");
+
+    if (!m_running && !m_udpSocket.isOpen()) {
+        return;
+    }
+
+    m_running = false;
+    m_fifo.setDataBlockServedCallback({});
+
+    if (m_udpSocket.isOpen()) {
+        m_udpSocket.close();
+    }
+
+    m_socketReady = false;
+    m_socketErrorReported = false;
 }
 
 void RemoteOutputSender::setDestination(const QString& address, uint16_t port)
@@ -65,6 +100,34 @@ void RemoteOutputSender::setDestination(const QString& address, uint16_t port)
     m_remoteAddress = address;
     m_remotePort = port;
     m_remoteHostAddress.setAddress(address);
+}
+
+bool RemoteOutputSender::ensureSocketReady()
+{
+    if (!m_running) {
+        return false;
+    }
+
+    if ((m_udpSocket.state() == QAbstractSocket::BoundState) ||
+        (m_udpSocket.state() == QAbstractSocket::ConnectedState))
+    {
+        m_socketReady = true;
+        return true;
+    }
+
+    if (m_udpSocket.state() != QAbstractSocket::UnconnectedState) {
+        m_udpSocket.close();
+    }
+
+    m_socketReady = m_udpSocket.bind(QHostAddress::AnyIPv4, 0, QUdpSocket::DefaultForPlatform);
+
+    if (!m_socketReady && !m_socketErrorReported)
+    {
+        qWarning() << "RemoteOutputSender::ensureSocketReady: bind failed:" << m_udpSocket.errorString();
+        m_socketErrorReported = true;
+    }
+
+    return m_socketReady;
 }
 
 RemoteDataFrame *RemoteOutputSender::getDataFrame()
@@ -77,11 +140,11 @@ void RemoteOutputSender::handleData()
     RemoteDataFrame *dataFrame;
     unsigned int remainder = m_fifo.getRemainder();
 
-    while (remainder != 0)
+    while (m_running && (remainder != 0))
     {
         remainder = m_fifo.readDataFrame(&dataFrame);
 
-        if (dataFrame) {
+        if (m_running && dataFrame) {
             sendDataFrame(dataFrame);
         }
     }
@@ -93,6 +156,12 @@ void RemoteOutputSender::sendDataFrame(RemoteDataFrame *dataFrame)
 	CM256::cm256_block descriptorBlocks[256]; //!< Pointers to data for CM256 encoder
 	RemoteProtectedBlock fecBlocks[256];   //!< FEC data
 
+    if (!ensureSocketReady())
+    {
+        dataFrame->m_txControlBlock.m_processed = true;
+        return;
+    }
+
     uint16_t frameIndex = dataFrame->m_txControlBlock.m_frameIndex;
     int nbBlocksFEC = dataFrame->m_txControlBlock.m_nbBlocksFEC;
     m_remoteHostAddress.setAddress(dataFrame->m_txControlBlock.m_dataAddress);
@@ -101,10 +170,16 @@ void RemoteOutputSender::sendDataFrame(RemoteDataFrame *dataFrame)
 
     if ((nbBlocksFEC == 0) || !m_cm256p) // Do not FEC encode
     {
-        if (m_udpSocket)
-        {
-            for (int i = 0; i < RemoteNbOrginalBlocks; i++) { // send blocks via UDP
-                m_udpSocket->writeDatagram((const char*)&txBlockx[i], (qint64 ) RemoteUdpSize, m_remoteHostAddress, dataPort);
+        for (int i = 0; i < RemoteNbOrginalBlocks; i++) { // send blocks via UDP
+            if (m_udpSocket.writeDatagram((const char*)&txBlockx[i], (qint64 ) RemoteUdpSize, m_remoteHostAddress, dataPort) < 0)
+            {
+                if (!m_socketErrorReported) {
+                    qWarning() << "RemoteOutputSender::sendDataFrame: writeDatagram failed:" << m_udpSocket.errorString();
+                    m_socketErrorReported = true;
+                }
+
+                m_socketReady = false;
+                break;
             }
         }
     }
@@ -148,10 +223,16 @@ void RemoteOutputSender::sendDataFrame(RemoteDataFrame *dataFrame)
         }
 
         // Transmit all blocks
-        if (m_udpSocket)
-        {
-            for (int i = 0; i < cm256Params.OriginalCount + cm256Params.RecoveryCount; i++) { // send blocks via UDP
-                m_udpSocket->writeDatagram((const char*)&txBlockx[i], (qint64 ) RemoteUdpSize, m_remoteHostAddress, dataPort);
+        for (int i = 0; i < cm256Params.OriginalCount + cm256Params.RecoveryCount; i++) { // send blocks via UDP
+            if (m_udpSocket.writeDatagram((const char*)&txBlockx[i], (qint64 ) RemoteUdpSize, m_remoteHostAddress, dataPort) < 0)
+            {
+                if (!m_socketErrorReported) {
+                    qWarning() << "RemoteOutputSender::sendDataFrame: writeDatagram failed:" << m_udpSocket.errorString();
+                    m_socketErrorReported = true;
+                }
+
+                m_socketReady = false;
+                break;
             }
         }
     }

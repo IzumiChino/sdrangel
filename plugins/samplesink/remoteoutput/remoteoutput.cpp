@@ -18,6 +18,7 @@
 #include <string.h>
 #include <errno.h>
 #include <QDebug>
+#include <QMetaObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QJsonParseError>
@@ -43,6 +44,7 @@ MESSAGE_CLASS_DEFINITION(RemoteOutput::MsgStartStop, Message)
 MESSAGE_CLASS_DEFINITION(RemoteOutput::MsgConfigureRemoteOutputChunkCorrection, Message)
 MESSAGE_CLASS_DEFINITION(RemoteOutput::MsgReportRemoteData, Message)
 MESSAGE_CLASS_DEFINITION(RemoteOutput::MsgReportRemoteFixedData, Message)
+MESSAGE_CLASS_DEFINITION(RemoteOutput::MsgReportRemoteStatus, Message)
 MESSAGE_CLASS_DEFINITION(RemoteOutput::MsgRequestFixedData, Message)
 
 RemoteOutput::RemoteOutput(DeviceAPI *deviceAPI) :
@@ -92,6 +94,7 @@ bool RemoteOutput::start()
 
 	m_remoteOutputWorker = new RemoteOutputWorker(&m_sampleSourceFifo);
     m_remoteOutputWorker->moveToThread(&m_remoteOutputWorkerThread);
+    QObject::connect(&m_remoteOutputWorkerThread, &QThread::finished, m_remoteOutputWorker, &QObject::deleteLater);
     m_remoteOutputWorker->setDeviceIndex(m_deviceAPI->getDeviceSetIndex());
 	m_remoteOutputWorker->setDataAddress(m_settings.m_dataAddress, m_settings.m_dataPort);
 	m_remoteOutputWorker->setSamplerate(m_sampleRate);
@@ -127,22 +130,127 @@ void RemoteOutput::stop()
 	if (m_remoteOutputWorker)
 	{
         stopWorker();
-		delete m_remoteOutputWorker;
 		m_remoteOutputWorker = nullptr;
 	}
 }
 
 void RemoteOutput::startWorker()
 {
-    m_remoteOutputWorker->startWork();
-    m_remoteOutputWorkerThread.start();
+    if (!m_remoteOutputWorker) {
+        return;
+    }
+
+    if (!m_remoteOutputWorkerThread.isRunning()) {
+        m_remoteOutputWorkerThread.start();
+    }
+
+    QMetaObject::invokeMethod(m_remoteOutputWorker, "startWork", Qt::BlockingQueuedConnection);
 }
 
 void RemoteOutput::stopWorker()
 {
-	m_remoteOutputWorker->stopWork();
+    if (!m_remoteOutputWorker || !m_remoteOutputWorkerThread.isRunning()) {
+        return;
+    }
+
+    QMetaObject::invokeMethod(m_remoteOutputWorker, "stopWork", Qt::BlockingQueuedConnection);
 	m_remoteOutputWorkerThread.quit();
 	m_remoteOutputWorkerThread.wait();
+}
+
+void RemoteOutput::setWorkerDataAddress(const QString& address, uint16_t port)
+{
+    if (!m_remoteOutputWorker) {
+        return;
+    }
+
+    if (m_remoteOutputWorkerThread.isRunning())
+    {
+        RemoteOutputWorker *worker = m_remoteOutputWorker;
+        QMetaObject::invokeMethod(worker, [worker, address, port]() {
+            worker->setDataAddress(address, port);
+        }, Qt::BlockingQueuedConnection);
+    }
+    else
+    {
+        m_remoteOutputWorker->setDataAddress(address, port);
+    }
+}
+
+void RemoteOutput::setWorkerNbBlocksFEC(uint32_t nbBlocksFEC)
+{
+    if (!m_remoteOutputWorker) {
+        return;
+    }
+
+    if (m_remoteOutputWorkerThread.isRunning())
+    {
+        RemoteOutputWorker *worker = m_remoteOutputWorker;
+        QMetaObject::invokeMethod(worker, [worker, nbBlocksFEC]() {
+            worker->setNbBlocksFEC(nbBlocksFEC);
+        }, Qt::BlockingQueuedConnection);
+    }
+    else
+    {
+        m_remoteOutputWorker->setNbBlocksFEC(nbBlocksFEC);
+    }
+}
+
+void RemoteOutput::setWorkerNbTxBytes(uint32_t nbTxBytes)
+{
+    if (!m_remoteOutputWorker) {
+        return;
+    }
+
+    if (m_remoteOutputWorkerThread.isRunning())
+    {
+        RemoteOutputWorker *worker = m_remoteOutputWorker;
+        QMetaObject::invokeMethod(worker, [worker, nbTxBytes]() {
+            worker->setNbTxBytes(nbTxBytes);
+        }, Qt::BlockingQueuedConnection);
+    }
+    else
+    {
+        m_remoteOutputWorker->setNbTxBytes(nbTxBytes);
+    }
+}
+
+void RemoteOutput::setWorkerSampleRate(int sampleRate)
+{
+    if (!m_remoteOutputWorker) {
+        return;
+    }
+
+    if (m_remoteOutputWorkerThread.isRunning())
+    {
+        RemoteOutputWorker *worker = m_remoteOutputWorker;
+        QMetaObject::invokeMethod(worker, [worker, sampleRate]() {
+            worker->setSamplerate(sampleRate);
+        }, Qt::BlockingQueuedConnection);
+    }
+    else
+    {
+        m_remoteOutputWorker->setSamplerate(sampleRate);
+    }
+}
+
+void RemoteOutput::setWorkerChunkCorrection(int chunkCorrection)
+{
+    if (!m_remoteOutputWorker) {
+        return;
+    }
+
+    if (m_remoteOutputWorkerThread.isRunning())
+    {
+        RemoteOutputWorker *worker = m_remoteOutputWorker;
+        QMetaObject::invokeMethod(worker, [worker, chunkCorrection]() {
+            worker->setChunkCorrection(chunkCorrection);
+        }, Qt::BlockingQueuedConnection);
+    }
+    else
+    {
+        m_remoteOutputWorker->setChunkCorrection(chunkCorrection);
+    }
 }
 
 QByteArray RemoteOutput::serialize() const
@@ -210,9 +318,9 @@ bool RemoteOutput::handleMessage(const Message& message)
 		if (m_remoteOutputWorker != nullptr)
 		{
 			if (working) {
-                m_remoteOutputWorker->startWork();
+                startWorker();
 			} else {
-                m_remoteOutputWorker->stopWork();
+                stopWorker();
 			}
 		}
 
@@ -244,9 +352,7 @@ bool RemoteOutput::handleMessage(const Message& message)
 	{
         auto& conf = (const MsgConfigureRemoteOutputChunkCorrection&) message;
 
-        if (m_remoteOutputWorker != nullptr) {
-            m_remoteOutputWorker->setChunkCorrection(conf.getChunkCorrection());
-        }
+    setWorkerChunkCorrection(conf.getChunkCorrection());
 
         return true;
 	}
@@ -271,43 +377,72 @@ bool RemoteOutput::handleMessage(const Message& message)
 
 void RemoteOutput::applySettings(const RemoteOutputSettings& settings, const QList<QString>& settingsKeys, bool force)
 {
-    qDebug() << "RemoteOutput::applySettings: force:" << force << settings.getDebugString(settingsKeys, force);
+    RemoteOutputSettings sanitizedSettings = settings;
+    sanitizedSettings.m_sampleRate = RemoteOutputSettings::clampSampleRate(sanitizedSettings.m_sampleRate);
+
+    qDebug() << "RemoteOutput::applySettings: force:" << force << sanitizedSettings.getDebugString(settingsKeys, force);
+
+    const bool hadManualSampleRateOverride = m_settings.m_overrideRemoteSampleRate;
+
+    if (force ||
+        settingsKeys.contains("apiAddress") ||
+        settingsKeys.contains("apiPort") ||
+        settingsKeys.contains("deviceIndex") ||
+        settingsKeys.contains("channelIndex"))
+    {
+        m_remoteReportMode = RemoteReportMode::Unknown;
+    }
+
     QMutexLocker mutexLocker(&m_mutex);
 
     if ((force ||
         settingsKeys.contains("dataAddress") ||
         settingsKeys.contains("dataPort")) && m_remoteOutputWorker)
     {
-        m_remoteOutputWorker->setDataAddress(settings.m_dataAddress, settings.m_dataPort);
+        setWorkerDataAddress(sanitizedSettings.m_dataAddress, sanitizedSettings.m_dataPort);
     }
 
     if ((force || settingsKeys.contains("nbFECBlocks")) && m_remoteOutputWorker)
     {
-        m_remoteOutputWorker->setNbBlocksFEC(settings.m_nbFECBlocks);
+        setWorkerNbBlocksFEC(sanitizedSettings.m_nbFECBlocks);
     }
 
     if ((force || settingsKeys.contains("nbTxBytes")) && m_remoteOutputWorker)
     {
         stopWorker();
-        m_remoteOutputWorker->setNbTxBytes(settings.m_nbTxBytes);
+        setWorkerNbTxBytes(sanitizedSettings.m_nbTxBytes);
         startWorker();
     }
 
     mutexLocker.unlock();
 
-    if (settings.m_useReverseAPI)
+    if (sanitizedSettings.m_useReverseAPI)
     {
-        bool fullUpdate = (settingsKeys.contains("useReverseAPI") && settings.m_useReverseAPI) ||
+        bool fullUpdate = (settingsKeys.contains("useReverseAPI") && sanitizedSettings.m_useReverseAPI) ||
             settingsKeys.contains("reverseAPIAddress") ||
             settingsKeys.contains("reverseAPIPort") ||
             settingsKeys.contains("reverseAPIDeviceIndex");
-        webapiReverseSendSettings(settingsKeys, settings, fullUpdate || force);
+        webapiReverseSendSettings(settingsKeys, sanitizedSettings, fullUpdate || force);
+    }
+
+    if ((force || settingsKeys.contains("sampleRate") || settingsKeys.contains("overrideRemoteSampleRate"))
+        && sanitizedSettings.m_overrideRemoteSampleRate
+        && (sanitizedSettings.m_sampleRate > 0)
+        && (static_cast<int>(sanitizedSettings.m_sampleRate) != m_sampleRate))
+    {
+        m_sampleRate = sanitizedSettings.m_sampleRate;
+        applySampleRate();
     }
 
     if (force) {
-        m_settings = settings;
+        m_settings = sanitizedSettings;
     } else {
-        m_settings.applySettings(settingsKeys, settings);
+        m_settings.applySettings(settingsKeys, sanitizedSettings);
+    }
+
+    if (hadManualSampleRateOverride && !m_settings.m_overrideRemoteSampleRate)
+    {
+        requestRemoteReport(m_remoteReportMode == RemoteReportMode::RemoteInput ? RemoteReportMode::RemoteInput : RemoteReportMode::Unknown);
     }
 }
 
@@ -319,9 +454,7 @@ void RemoteOutput::applyCenterFrequency()
 
 void RemoteOutput::applySampleRate()
 {
-    if (m_remoteOutputWorker) {
-        m_remoteOutputWorker->setSamplerate(m_sampleRate);
-    }
+    setWorkerSampleRate(m_sampleRate);
 
     m_tickMultiplier = 480000 / m_sampleRate;
     m_tickMultiplier = m_tickMultiplier < 1 ? 1 : m_tickMultiplier;
@@ -330,6 +463,51 @@ void RemoteOutput::applySampleRate()
 
     auto *notif = new DSPSignalNotification(m_sampleRate, m_centerFrequency);
     m_deviceAPI->getDeviceEngineInputMessageQueue()->push(notif);
+}
+
+void RemoteOutput::requestRemoteReport(RemoteReportMode mode)
+{
+    QString reportURL;
+
+    if (mode == RemoteReportMode::RemoteInput)
+    {
+        reportURL = QString("http://%1:%2/sdrangel/deviceset/%3/device/report")
+            .arg(m_settings.m_apiAddress)
+            .arg(m_settings.m_apiPort)
+            .arg(m_settings.m_deviceIndex);
+    }
+    else
+    {
+        reportURL = QString("http://%1:%2/sdrangel/deviceset/%3/channel/%4/report")
+            .arg(m_settings.m_apiAddress)
+            .arg(m_settings.m_apiPort)
+            .arg(m_settings.m_deviceIndex)
+            .arg(m_settings.m_channelIndex);
+    }
+
+    m_networkRequest.setUrl(QUrl(reportURL));
+    m_networkManager->get(m_networkRequest);
+}
+
+void RemoteOutput::requestRemoteInputSettings()
+{
+    const auto settingsURL = QString("http://%1:%2/sdrangel/deviceset/%3/device/settings")
+        .arg(m_settings.m_apiAddress)
+        .arg(m_settings.m_apiPort)
+        .arg(m_settings.m_deviceIndex);
+
+    m_networkRequest.setUrl(QUrl(settingsURL));
+    m_networkManager->get(m_networkRequest);
+}
+
+void RemoteOutput::reportRemoteStatus(const QString& message, bool usesDeviceReport, quint64 centerFrequency, int sampleRate)
+{
+    if (!m_guiMessageQueue) {
+        return;
+    }
+
+    auto *msg = MsgReportRemoteStatus::create(message, usesDeviceReport, centerFrequency, sampleRate);
+    m_guiMessageQueue->push(msg);
 }
 
 int RemoteOutput::webapiRunGet(
@@ -497,16 +675,7 @@ void RemoteOutput::tick()
 {
     if (++m_tickCount == 20) // Every second
     {
-        QString reportURL;
-
-        reportURL = QString("http://%1:%2/sdrangel/deviceset/%3/channel/%4/report")
-                .arg(m_settings.m_apiAddress)
-                .arg(m_settings.m_apiPort)
-                .arg(m_settings.m_deviceIndex)
-                .arg(m_settings.m_channelIndex);
-
-        m_networkRequest.setUrl(QUrl(reportURL));
-        m_networkManager->get(m_networkRequest);
+        requestRemoteReport(m_remoteReportMode == RemoteReportMode::RemoteInput ? RemoteReportMode::RemoteInput : RemoteReportMode::Unknown);
 
         m_tickCount = 0;
     }
@@ -516,6 +685,15 @@ void RemoteOutput::networkManagerFinished(QNetworkReply *reply)
 {
     if (reply->error())
     {
+        const auto replyPath = reply->url().path();
+
+        if (replyPath.endsWith("/report") && replyPath.contains("/channel/"))
+        {
+            reply->deleteLater();
+            requestRemoteReport(RemoteReportMode::RemoteInput);
+            return;
+        }
+
         qInfo("RemoteOutput::networkManagerFinished: error: %s", qPrintable(reply->errorString()));
     }
     else
@@ -552,6 +730,12 @@ void RemoteOutput::analyzeApiReply(const QJsonObject& jsonObject, const QString&
 {
     if (jsonObject.contains("RemoteSourceReport"))
     {
+        if (m_remoteReportMode != RemoteReportMode::RemoteSource)
+        {
+            m_remoteReportMode = RemoteReportMode::RemoteSource;
+            reportRemoteStatus("RemoteSource receiver detected.", false, 0, 0);
+        }
+
         MsgReportRemoteData::RemoteData msgRemoteData;
         QJsonObject report = jsonObject["RemoteSourceReport"].toObject();
         uint64_t centerFrequency = report["deviceCenterFreq"].toInt() + report["centerFreq"].toInt();
@@ -564,7 +748,7 @@ void RemoteOutput::analyzeApiReply(const QJsonObject& jsonObject, const QString&
 
         int remoteRate = report["sampleRate"].toInt();
 
-        if (remoteRate != m_sampleRate)
+        if (!m_settings.m_overrideRemoteSampleRate && (remoteRate != m_sampleRate))
         {
             m_sampleRate = remoteRate;
             applySampleRate();
@@ -603,6 +787,83 @@ void RemoteOutput::analyzeApiReply(const QJsonObject& jsonObject, const QString&
             queueLengthCompensation(m_sampleRate, m_queueLength, m_queueSize);
             m_greaterTickCount = 0;
         }
+    }
+    else if (jsonObject.contains("RemoteInputReport"))
+    {
+        if (m_remoteReportMode != RemoteReportMode::RemoteInput)
+        {
+            m_remoteReportMode = RemoteReportMode::RemoteInput;
+        }
+
+        const auto report = jsonObject["RemoteInputReport"].toObject();
+        const auto centerFrequency = static_cast<quint64>(report["centerFrequency"].toDouble());
+        const auto sampleRate = report["sampleRate"].toInt();
+
+        if (centerFrequency != m_centerFrequency)
+        {
+            m_centerFrequency = centerFrequency;
+            applyCenterFrequency();
+        }
+
+        if (!m_settings.m_overrideRemoteSampleRate && (sampleRate > 0) && (sampleRate != m_sampleRate))
+        {
+            m_sampleRate = sampleRate;
+            applySampleRate();
+        }
+
+        reportRemoteStatus(
+            "RemoteInput receiver detected. Channel index is ignored.",
+            true,
+            m_centerFrequency,
+            m_sampleRate);
+
+        requestRemoteInputSettings();
+    }
+    else if (jsonObject.contains("remoteInputSettings"))
+    {
+        const auto settingsObject = jsonObject["remoteInputSettings"].toObject();
+        const auto dataAddress = settingsObject["dataAddress"].toString();
+        const auto multicastAddress = settingsObject["multicastAddress"].toString();
+        const auto multicastJoinValue = settingsObject.value("multicastJoin");
+        const bool multicastJoin = multicastJoinValue.isBool() ?
+            multicastJoinValue.toBool() :
+            (multicastJoinValue.toInt() != 0);
+        const auto targetAddress = (multicastJoin && !multicastAddress.isEmpty()) ? multicastAddress : dataAddress;
+        const auto dataPort = static_cast<quint16>(settingsObject["dataPort"].toInt());
+
+        QList<QString> settingsKeys;
+        RemoteOutputSettings settings = m_settings;
+
+        if (!targetAddress.isEmpty() && (settings.m_dataAddress != targetAddress))
+        {
+            settings.m_dataAddress = targetAddress;
+            settingsKeys.append("dataAddress");
+        }
+
+        if ((dataPort != 0) && (settings.m_dataPort != dataPort))
+        {
+            settings.m_dataPort = dataPort;
+            settingsKeys.append("dataPort");
+        }
+
+        if (!settingsKeys.isEmpty())
+        {
+            applySettings(settings, settingsKeys, false);
+
+            if (m_guiMessageQueue)
+            {
+                auto *msg = MsgConfigureRemoteOutput::create(settings, settingsKeys, false);
+                m_guiMessageQueue->push(msg);
+            }
+        }
+
+        reportRemoteStatus(
+            QString("RemoteInput receiver detected. Streaming to %1:%2.")
+                .arg(settings.m_dataAddress)
+                .arg(settings.m_dataPort),
+            true,
+            m_centerFrequency,
+            m_sampleRate);
     }
     else if (jsonObject.contains("remoteOutputSettings"))
     {

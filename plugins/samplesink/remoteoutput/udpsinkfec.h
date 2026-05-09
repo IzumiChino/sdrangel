@@ -24,12 +24,12 @@
 
 #include <QObject>
 #include <QHostAddress>
+#include <QThread>
 #include <QString>
 
 #include "dsp/dsptypes.h"
 #include "util/CRC64.h"
 
-class QThread;
 class RemoteOutputSender;
 
 class UDPSinkFEC : public QObject
@@ -98,7 +98,7 @@ private:
     uint32_t m_deviceIndex;              //!< Index of current device set
 
     RemoteOutputSender *m_remoteOutputSender;
-    QThread *m_senderThread;
+    QThread m_senderThread;
     QString m_remoteAddress;
     uint16_t m_remotePort;
 
