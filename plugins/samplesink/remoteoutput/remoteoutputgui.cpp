@@ -96,7 +96,6 @@ RemoteOutputSinkGui::RemoteOutputSinkGui(DeviceUISet *deviceUISet, QWidget* pare
 	DeviceGUI(parent),
 	ui(new Ui::RemoteOutputGui),
 	m_settings(),
-	m_remoteOutput(0),
 	m_deviceCenterFrequency(0),
 	m_samplesCount(0),
 	m_tickCount(0),
@@ -132,10 +131,10 @@ RemoteOutputSinkGui::RemoteOutputSinkGui(DeviceUISet *deviceUISet, QWidget* pare
 	connect(&m_statusTimer, SIGNAL(timeout()), this, SLOT(updateStatus()));
 	m_statusTimer.start(500);
 
-	m_remoteOutput = (RemoteOutput*) m_deviceUISet->m_deviceAPI->getSampleSink();
-
 	connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()), Qt::QueuedConnection);
-    m_remoteOutput->setMessageQueueToGUI(&m_inputMessageQueue);
+    if (RemoteOutput *remoteOutput = getRemoteOutput()) {
+        remoteOutput->setMessageQueueToGUI(&m_inputMessageQueue);
+    }
 
 	m_deviceUISet->getSpectrum()->setCenterFrequency(m_deviceCenterFrequency);
 
@@ -344,8 +343,17 @@ void RemoteOutputSinkGui::sendSettings()
 void RemoteOutputSinkGui::updateHardware()
 {
     qDebug() << "RemoteOutputSinkGui::updateHardware";
+    RemoteOutput *remoteOutput = getRemoteOutput();
+
+    if (!remoteOutput) {
+        qWarning() << "RemoteOutputSinkGui::updateHardware: remote output sink is not ready yet";
+        return;
+    }
+
     RemoteOutput::MsgConfigureRemoteOutput* message = RemoteOutput::MsgConfigureRemoteOutput::create(m_settings, m_settingsKeys, m_forceSettings);
-    m_remoteOutput->getInputMessageQueue()->push(message);
+    if (!pushMessageToRemoteOutput(message)) {
+        return;
+    }
     m_forceSettings = false;
     m_settingsKeys.clear();
     m_updateTimer.stop();
@@ -460,7 +468,7 @@ void RemoteOutputSinkGui::on_apiAddress_returnPressed()
     sendSettings();
 
     RemoteOutput::MsgRequestFixedData *msg = RemoteOutput::MsgRequestFixedData::create();
-    m_remoteOutput->getInputMessageQueue()->push(msg);
+    pushMessageToRemoteOutput(msg);
 }
 
 void RemoteOutputSinkGui::on_apiPort_returnPressed()
@@ -478,7 +486,7 @@ void RemoteOutputSinkGui::on_apiPort_returnPressed()
     sendSettings();
 
     RemoteOutput::MsgRequestFixedData *msg = RemoteOutput::MsgRequestFixedData::create();
-    m_remoteOutput->getInputMessageQueue()->push(msg);
+    pushMessageToRemoteOutput(msg);
 }
 
 void RemoteOutputSinkGui::on_dataAddress_returnPressed()
@@ -521,7 +529,7 @@ void RemoteOutputSinkGui::on_apiApplyButton_clicked(bool checked)
     sendSettings();
 
     RemoteOutput::MsgRequestFixedData *msg = RemoteOutput::MsgRequestFixedData::create();
-    m_remoteOutput->getInputMessageQueue()->push(msg);
+    pushMessageToRemoteOutput(msg);
 }
 
 void RemoteOutputSinkGui::on_dataApplyButton_clicked(bool checked)
@@ -547,7 +555,7 @@ void RemoteOutputSinkGui::on_startStop_toggled(bool checked)
     if (m_doApplySettings)
     {
         RemoteOutput::MsgStartStop *message = RemoteOutput::MsgStartStop::create(checked);
-        m_remoteOutput->getInputMessageQueue()->push(message);
+        pushMessageToRemoteOutput(message);
     }
 }
 
@@ -755,5 +763,30 @@ bool RemoteOutputSinkGui::applyManualSampleRateSetting()
     m_settingsKeys.append("sampleRate");
     displayManualSampleRate(m_settings.m_sampleRate, ui->manualSampleRateUnit->currentIndex());
     sendSettings();
+
+    return true;
+}
+
+RemoteOutput *RemoteOutputSinkGui::getRemoteOutput() const
+{
+    if (!m_deviceUISet || !m_deviceUISet->m_deviceAPI) {
+        return nullptr;
+    }
+
+    return qobject_cast<RemoteOutput*>(m_deviceUISet->m_deviceAPI->getSampleSink());
+}
+
+bool RemoteOutputSinkGui::pushMessageToRemoteOutput(Message *message) const
+{
+    RemoteOutput *remoteOutput = getRemoteOutput();
+
+    if (!remoteOutput)
+    {
+        delete message;
+        qWarning() << "RemoteOutputSinkGui::pushMessageToRemoteOutput: remote output sink is not available";
+        return false;
+    }
+
+    remoteOutput->getInputMessageQueue()->push(message);
     return true;
 }

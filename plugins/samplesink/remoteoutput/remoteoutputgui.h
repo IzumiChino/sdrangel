@@ -87,7 +87,6 @@ private:
 	RemoteOutputSettings m_controlSettings; //!< settings last sent to device via control port
 	QTimer m_updateTimer;
     QTimer m_statusTimer;
-	DeviceSampleSink* m_remoteOutput;
     int m_sampleRate;
     quint64 m_deviceCenterFrequency; //!< Center frequency in device
 	int m_samplesCount;
@@ -129,6 +128,8 @@ private:
     void displayEventTimer();
 	bool handleMessage(const Message& message);
     void makeUIConnections();
+    RemoteOutput *getRemoteOutput() const;
+    bool pushMessageToRemoteOutput(Message *message) const;
 
 private slots:
     void handleInputMessages();
