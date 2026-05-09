@@ -76,13 +76,9 @@ FT8DemodBaseband::FT8DemodBaseband() :
 
     m_pskReporterThread->start();
 
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &FT8DemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     m_channelSampleRate = 0;
     m_sink.setFT8Buffer(&m_ft8Buffer);

@@ -598,7 +598,7 @@ void PagerDemodSink::processOneSample(Complex &ci)
 
             for (; it != dataPipes.end(); ++it)
             {
-                DataFifo *fifo = qobject_cast<DataFifo*>((*it)->m_element);
+                DataFifo *fifo = getDataFifoFromPipeElement((*it)->m_element);
 
                 if (fifo) {
                     fifo->write((quint8*) &m_demodBuffer[0], m_demodBuffer.size() * sizeof(qint16), DataFifo::DataTypeI16);

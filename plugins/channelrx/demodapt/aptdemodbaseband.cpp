@@ -53,13 +53,9 @@ void APTDemodBaseband::startWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &APTDemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
     m_running = true;
 }
 
@@ -67,12 +63,7 @@ void APTDemodBaseband::stopWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
     disconnect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
-    QObject::disconnect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &APTDemodBaseband::handleData
-    );
+    m_sampleFifo.setDataReadyCallback({});
     m_running = false;
 }
 

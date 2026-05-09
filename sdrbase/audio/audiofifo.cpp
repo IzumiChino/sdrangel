@@ -38,14 +38,14 @@ AudioFifo::AudioFifo(uint32_t numSamples) :
 	m_fifo(nullptr),
     m_sampleSize(sizeof(AudioSample))
 {
-	QMutexLocker mutexLocker(&m_mutex);
+	std::lock_guard<std::mutex> mutexLocker(m_mutex);
 
 	create(numSamples);
 }
 
 AudioFifo::~AudioFifo()
 {
-	QMutexLocker mutexLocker(&m_mutex);
+	std::lock_guard<std::mutex> mutexLocker(m_mutex);
 
 	if (m_fifo)
 	{
@@ -58,14 +58,14 @@ AudioFifo::~AudioFifo()
 
 bool AudioFifo::setSize(uint32_t numSamples)
 {
-	QMutexLocker mutexLocker(&m_mutex);
+	std::lock_guard<std::mutex> mutexLocker(m_mutex);
 
 	return create(numSamples);
 }
 
 bool AudioFifo::setSampleSize(uint32_t sampleSize, uint32_t numSamples)
 {
-	QMutexLocker mutexLocker(&m_mutex);
+	std::lock_guard<std::mutex> mutexLocker(m_mutex);
     m_sampleSize = sampleSize;
 	return create(numSamples);
 }
@@ -75,12 +75,14 @@ uint32_t AudioFifo::write(const quint8* data, uint32_t numSamples)
 	uint32_t total;
 	uint32_t remaining;
 	uint32_t copyLen;
+	std::function<void()> dataReadyCallback;
+	std::function<void(int)> overflowCallback;
 
 	if (!m_fifo) {
 		return 0;
 	}
 
-	m_mutex.lock();
+	std::unique_lock<std::mutex> mutexLocker(m_mutex);
 
 	total = MIN(numSamples, m_size - m_fill);
 	remaining = total;
@@ -89,10 +91,11 @@ uint32_t AudioFifo::write(const quint8* data, uint32_t numSamples)
 	{
 		if (isFull())
 		{
-			m_mutex.unlock();
+			dataReadyCallback = m_dataReadyCallback;
+			mutexLocker.unlock();
 
-			if (total - remaining > 0) {
-				emit dataReady();
+			if ((total - remaining > 0) && dataReadyCallback) {
+				dataReadyCallback();
 			}
 
 			return total - remaining; // written so far
@@ -108,15 +111,22 @@ uint32_t AudioFifo::write(const quint8* data, uint32_t numSamples)
 		remaining -= copyLen;
 	}
 
-	m_mutex.unlock();
+	dataReadyCallback = m_dataReadyCallback;
+	overflowCallback = m_overflowCallback;
 
-	emit dataReady();
+	mutexLocker.unlock();
+
+	if (dataReadyCallback) {
+		dataReadyCallback();
+	}
 
 	if (total < numSamples)
 	{
 		qCritical("AudioFifo::write: (%s) overflow %u samples",
 			qPrintable(m_label), numSamples - total);
-		emit overflow(numSamples - total);
+		if (overflowCallback) {
+			overflowCallback(numSamples - total);
+		}
 	}
 
 	return total;
@@ -132,7 +142,7 @@ uint32_t AudioFifo::read(quint8* data, uint32_t numSamples)
 		return 0;
 	}
 
-	m_mutex.lock();
+	std::unique_lock<std::mutex> mutexLocker(m_mutex);
 
 	total = MIN(numSamples, m_fill);
 	remaining = total;
@@ -141,7 +151,7 @@ uint32_t AudioFifo::read(quint8* data, uint32_t numSamples)
 	{
 		if (isEmpty())
 		{
-			m_mutex.unlock();
+			mutexLocker.unlock();
 			return total - remaining; // read so far
 		}
 
@@ -156,12 +166,14 @@ uint32_t AudioFifo::read(quint8* data, uint32_t numSamples)
 		remaining -= copyLen;
 	}
 
-	m_mutex.unlock();
+	mutexLocker.unlock();
 	return total;
 }
 
 bool AudioFifo::readOne(quint8* data)
 {
+	std::lock_guard<std::mutex> mutexLocker(m_mutex);
+
 	if ((!m_fifo) || isEmpty()) {
 		return false;
 	}
@@ -175,32 +187,55 @@ bool AudioFifo::readOne(quint8* data)
 
 uint32_t AudioFifo::writeOne(const quint8* data)
 {
-	if (!m_fifo) {
+	std::function<void()> dataReadyCallback;
+	std::function<void(int)> overflowCallback;
+	bool overflowed = false;
+
+	{
+		std::lock_guard<std::mutex> mutexLocker(m_mutex);
+
+		if (!m_fifo) {
+			return 0;
+		}
+
+        if (isFull())
+        {
+            overflowCallback = m_overflowCallback;
+            overflowed = true;
+        }
+        else
+        {
+            memcpy(m_fifo + (m_tail * m_sampleSize), data, m_sampleSize);
+            m_tail += 1;
+            m_tail %= m_size;
+            m_fill += 1;
+
+			dataReadyCallback = m_dataReadyCallback;
+        }
+	}
+
+	if (overflowed)
+	{
+		if (overflowCallback) {
+			overflowCallback(1);
+		}
 		return 0;
 	}
 
-    if (isFull())
-    {
-        emit overflow(1);
-        return 0;
-    }
+	if (dataReadyCallback) {
+		dataReadyCallback();
+	}
 
-	m_mutex.lock();
-
-    memcpy(m_fifo + (m_tail * m_sampleSize), data, m_sampleSize);
-    m_tail += 1;
-    m_tail %= m_size;
-    m_fill += 1;
-
-	m_mutex.unlock();
-
-	emit dataReady();
 	return 1;
+
+	if (overflowCallback) {
+		overflowCallback(1);
+	}
 }
 
 uint AudioFifo::drain(uint32_t numSamples)
 {
-	QMutexLocker mutexLocker(&m_mutex);
+	std::lock_guard<std::mutex> mutexLocker(m_mutex);
 
 	if(numSamples > m_fill)
 	{
@@ -215,7 +250,7 @@ uint AudioFifo::drain(uint32_t numSamples)
 
 void AudioFifo::clear()
 {
-	QMutexLocker mutexLocker(&m_mutex);
+	std::lock_guard<std::mutex> mutexLocker(m_mutex);
 
 	m_fill = 0;
 	m_head = 0;

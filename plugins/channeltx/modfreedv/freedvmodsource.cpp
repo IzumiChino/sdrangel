@@ -545,9 +545,11 @@ void FreeDVModSource::applySettings(const QStringList& settingsKeys, const FreeD
     if ((settingsKeys.contains("modAFInput") && (settings.m_modAFInput != m_settings.m_modAFInput)) || force)
     {
         if (settings.m_modAFInput == FreeDVModSettings::FreeDVModInputAudio) {
-            connect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleAudio(); }, Qt::AutoConnection);
+            });
         } else {
-            disconnect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback({});
         }
     }
 

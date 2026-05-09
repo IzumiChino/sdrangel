@@ -31,13 +31,9 @@ NFMDemodBaseband::NFMDemodBaseband() :
     m_sampleFifo.setSize(SampleSinkFifo::getSizePolicy(48000));
 
     qDebug("NFMDemodBaseband::NFMDemodBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &NFMDemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     DSPEngine::instance()->getAudioDeviceManager()->addAudioSink(m_sink.getAudioFifo(), getInputMessageQueue());
     m_sink.applyAudioSampleRate(DSPEngine::instance()->getAudioDeviceManager()->getOutputSampleRate());

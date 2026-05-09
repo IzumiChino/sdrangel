@@ -55,13 +55,9 @@ void AISDemodBaseband::reset()
 void AISDemodBaseband::startWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &AISDemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
     m_running = true;
 }
@@ -70,12 +66,7 @@ void AISDemodBaseband::stopWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
     disconnect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
-    QObject::disconnect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &AISDemodBaseband::handleData
-    );
+    m_sampleFifo.setDataReadyCallback({});
     m_running = false;
 }
 

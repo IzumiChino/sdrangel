@@ -21,14 +21,16 @@
 #ifndef INCLUDE_AUDIOFIFO_H
 #define INCLUDE_AUDIOFIFO_H
 
-#include <QObject>
-#include <QMutex>
-#include <QWaitCondition>
+#include <cstdint>
+#include <functional>
+#include <mutex>
+
+#include <QString>
+#include <QtGlobal>
 
 #include "export.h"
 
-class SDRBASE_API AudioFifo : public QObject {
-	Q_OBJECT
+class SDRBASE_API AudioFifo {
 public:
 	AudioFifo();
 	AudioFifo(uint32_t numSamples);
@@ -44,6 +46,29 @@ public:
 
 	uint32_t drain(uint32_t numSamples);
 	void clear();
+	void setDataReadyCallback(std::function<void()> callback) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_dataReadyCallback = std::move(callback);
+	}
+	void setOverflowCallback(std::function<void(int)> callback) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_overflowCallback = std::move(callback);
+	}
+	void setUnderflowCallback(std::function<void()> callback) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_underflowCallback = std::move(callback);
+	}
+	void notifyUnderflow() {
+		std::function<void()> underflowCallback;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			underflowCallback = m_underflowCallback;
+		}
+
+		if (underflowCallback) {
+			underflowCallback();
+		}
+	}
 
 	inline uint32_t flush() { return drain(m_fill); }
 	inline uint32_t fill() const { return m_fill; }
@@ -53,7 +78,7 @@ public:
 	void setLabel(const QString& label) { m_label = label; }
 
 private:
-	QMutex m_mutex;
+	mutable std::mutex m_mutex;
 
 	qint8* m_fifo;
 
@@ -64,13 +89,11 @@ private:
 	uint32_t m_head;
 	uint32_t m_tail;
 	QString m_label;
+	std::function<void()> m_dataReadyCallback;
+	std::function<void(int)> m_overflowCallback;
+	std::function<void()> m_underflowCallback;
 
 	bool create(uint32_t numSamples);
-
-signals:
-	void dataReady();
-	void overflow(int nsamples);
-    void underflow();
 };
 
 #endif // INCLUDE_AUDIOFIFO_H

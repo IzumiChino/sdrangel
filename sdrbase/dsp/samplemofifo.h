@@ -19,17 +19,18 @@
 #ifndef INCLUDE_SAMPLEMOFIFO_H
 #define INCLUDE_SAMPLEMOFIFO_H
 
-#include <QObject>
-#include <QRecursiveMutex>
+#include <functional>
+#include <mutex>
+
+#include <QtGlobal>
+
 #include "dsp/dsptypes.h"
 #include "export.h"
 
-class SDRBASE_API SampleMOFifo : public QObject {
-	Q_OBJECT
-
+class SDRBASE_API SampleMOFifo {
 public:
-    SampleMOFifo(QObject *parent = nullptr);
-    SampleMOFifo(unsigned int nbStreams, unsigned int size, QObject *parent = nullptr);
+    SampleMOFifo();
+    SampleMOFifo(unsigned int nbStreams, unsigned int size);
     ~SampleMOFifo();
 
     void init(unsigned int nbStreams, unsigned int size);
@@ -68,7 +69,7 @@ public:
 
     unsigned int remainderSync()
     {
-        QMutexLocker mutexLocker(&m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         return m_readCount;
     }
 
@@ -78,17 +79,21 @@ public:
             return 0;
         }
 
-        QMutexLocker mutexLocker(&m_mutex);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         return m_vReadCount[stream];
     }
 
     static unsigned int getSizePolicy(unsigned int sampleRate);
     static const unsigned int m_rwDivisor;
     static const unsigned int m_guardDivisor;
-
-signals:
-	void dataReadSync();
-    void dataReadAsync(int streamIndex);
+    void setDataReadSyncCallback(std::function<void()> callback) {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_dataReadSyncCallback = std::move(callback);
+    }
+    void setDataReadAsyncCallback(std::function<void(int)> callback) {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_dataReadAsyncCallback = std::move(callback);
+    }
 
 private:
     std::vector<SampleVector> m_data;
@@ -103,7 +108,9 @@ private:
     std::vector<unsigned int> m_vReadCount;
     std::vector<unsigned int> m_vReadHead;
     std::vector<unsigned int> m_vWriteHead;
-	QRecursiveMutex m_mutex;
+    std::function<void()> m_dataReadSyncCallback;
+    std::function<void(int)> m_dataReadAsyncCallback;
+    mutable std::recursive_mutex m_mutex;
 };
 
 #endif // INCLUDE_SAMPLEMOFIFO_H

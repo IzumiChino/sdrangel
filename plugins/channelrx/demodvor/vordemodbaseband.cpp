@@ -57,13 +57,9 @@ void VORDemodBaseband::reset()
 void VORDemodBaseband::startWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &VORDemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
     m_running = true;
 }
@@ -72,12 +68,7 @@ void VORDemodBaseband::stopWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
     disconnect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
-    QObject::disconnect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &VORDemodBaseband::handleData
-    );
+    m_sampleFifo.setDataReadyCallback({});
     m_running = false;
 }
 

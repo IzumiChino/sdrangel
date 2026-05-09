@@ -114,7 +114,7 @@ void AMModSource::pullOne(Sample& sample)
         {
             for (auto& dataPipe : dataPipes)
             {
-                DataFifo *fifo = qobject_cast<DataFifo*>(dataPipe->m_element);
+                DataFifo *fifo = getDataFifoFromPipeElement(dataPipe->m_element);
 
                 if (fifo) {
                     fifo->write((quint8*) &m_demodBuffer[0], m_demodBuffer.size() * sizeof(qint16), DataFifo::DataTypeI16);
@@ -365,9 +365,11 @@ void AMModSource::applySettings(const QStringList& settingsKeys, const AMModSett
     if ((settingsKeys.contains("modAFInput") && settings.m_modAFInput != m_settings.m_modAFInput) || force)
     {
         if (settings.m_modAFInput == AMModSettings::AMModInputAudio) {
-            connect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback([this]() {
+                QMetaObject::invokeMethod(this, [this]() { handleAudio(); }, Qt::AutoConnection);
+            });
         } else {
-            disconnect(&m_audioFifo, SIGNAL(dataReady()), this, SLOT(handleAudio()));
+            m_audioFifo.setDataReadyCallback({});
         }
     }
 

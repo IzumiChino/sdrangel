@@ -35,13 +35,9 @@ UDPSourceBaseband::UDPSourceBaseband()
     m_channelizer = new UpChannelizer(&m_source);
 
     qDebug("UDPSourceBaseband::UDPSourceBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSourceFifo::dataRead,
-        this,
-        &UDPSourceBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
     m_source.setUDPFeedbackMessageQueue(&m_inputMessageQueue);

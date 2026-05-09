@@ -492,7 +492,9 @@ void DSPDeviceSourceEngine::handleSetSource(DeviceSampleSource* source)
 	if (m_deviceSampleSource)
 	{
 		qDebug("DSPDeviceSourceEngine::handleSetSource: set %s", qPrintable(source->getDeviceDescription()));
-		connect(m_deviceSampleSource->getSampleFifo(), SIGNAL(dataReady()), this, SLOT(handleData()), Qt::QueuedConnection);
+		m_deviceSampleSource->getSampleFifo()->setDataReadyCallback([this]() {
+			QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+		});
 	}
 	else
 	{

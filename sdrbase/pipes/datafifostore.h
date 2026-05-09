@@ -21,11 +21,24 @@
 #define SDRBASE_PIPES_DATAFIFOSTORE_H_
 
 #include <QList>
+#include <QObject>
 
+#include "dsp/datafifo.h"
 #include "export.h"
 #include "objectpipeelementsstore.h"
 
-class DataFifo;
+class SDRBASE_API DataPipeElement : public QObject
+{
+public:
+    DataPipeElement();
+    ~DataPipeElement() override = default;
+
+    DataFifo *getFifo() { return &m_fifo; }
+    const DataFifo *getFifo() const { return &m_fifo; }
+
+private:
+    DataFifo m_fifo;
+};
 
 class SDRBASE_API DataFifoStore : public ObjectPipeElementsStore
 {
@@ -38,7 +51,7 @@ public:
 
 private:
     void deleteAllElements();
-    QList<DataFifo*> m_dataFifos;
+    QList<DataPipeElement*> m_dataFifos;
 };
 
 #endif // SDRBASE_PIPES_DATAFIFOSTORE_H_

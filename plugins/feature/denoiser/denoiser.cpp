@@ -137,7 +137,7 @@ void Denoiser::start()
 
     if (m_dataPipe)
     {
-        DataFifo *fifo = qobject_cast<DataFifo*>(m_dataPipe->m_element);
+        DataFifo *fifo = getDataFifoFromPipeElement(m_dataPipe->m_element);
 
         if (fifo)
         {
@@ -167,7 +167,7 @@ void Denoiser::stop()
 
     if (m_dataPipe)
     {
-        DataFifo *fifo = qobject_cast<DataFifo*>(m_dataPipe->m_element);
+        DataFifo *fifo = getDataFifoFromPipeElement(m_dataPipe->m_element);
 
         if (fifo)
         {
@@ -237,7 +237,7 @@ bool Denoiser::handleMessage(const Message& cmd)
 
             if (m_dataPipe)
             {
-                DataFifo *fifo = qobject_cast<DataFifo*>(m_dataPipe->m_element);
+                DataFifo *fifo = getDataFifoFromPipeElement(m_dataPipe->m_element);
 
                 if (fifo) {
                     fifo->setSize(2*m_sampleRate);
@@ -343,7 +343,7 @@ void Denoiser::setChannel(ChannelAPI *selectedChannel)
     if (m_selectedChannel)
     {
         ObjectPipe *pipe = mainCore->getDataPipes().unregisterProducerToConsumer(m_selectedChannel, this, "demod");
-        DataFifo *fifo = qobject_cast<DataFifo*>(pipe->m_element);
+        DataFifo *fifo = getDataFifoFromPipeElement(pipe->m_element);
 
         if ((fifo) && m_running)
         {
@@ -365,7 +365,7 @@ void Denoiser::setChannel(ChannelAPI *selectedChannel)
 
     m_dataPipe = mainCore->getDataPipes().registerProducerToConsumer(selectedChannel, this, "demod");
     connect(m_dataPipe, SIGNAL(toBeDeleted(int, QObject*)), this, SLOT(handleDataPipeToBeDeleted(int, QObject*)));
-    DataFifo *fifo = qobject_cast<DataFifo*>(m_dataPipe->m_element);
+    DataFifo *fifo = getDataFifoFromPipeElement(m_dataPipe->m_element);
 
     if (fifo)
     {
@@ -671,7 +671,7 @@ void Denoiser::handleDataPipeToBeDeleted(int reason, QObject *object)
 
     if ((reason == 0) && (m_selectedChannel == object))
     {
-        DataFifo *fifo = qobject_cast<DataFifo*>(m_dataPipe->m_element);
+        DataFifo *fifo = getDataFifoFromPipeElement(m_dataPipe->m_element);
 
         if ((fifo) && m_running)
         {

@@ -32,13 +32,9 @@ WFMModBaseband::WFMModBaseband()
     m_channelizer = new UpChannelizer(&m_source);
 
     qDebug("WFMModBaseband::WFMModBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSourceFifo::dataRead,
-        this,
-        &WFMModBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     DSPEngine::instance()->getAudioDeviceManager()->addAudioSink(m_source.getFeedbackAudioFifo(), getInputMessageQueue());
     m_source.applyFeedbackAudioSampleRate(DSPEngine::instance()->getAudioDeviceManager()->getOutputSampleRate());

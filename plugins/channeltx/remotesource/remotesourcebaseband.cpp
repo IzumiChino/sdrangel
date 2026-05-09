@@ -33,13 +33,9 @@ RemoteSourceBaseband::RemoteSourceBaseband()
     m_channelizer = new UpChannelizer(&m_source);
 
     qDebug("RemoteSourceBaseband::RemoteSourceBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSourceFifo::dataRead,
-        this,
-        &RemoteSourceBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_source, SIGNAL(newChannelSampleRate(unsigned int)), this, SLOT(newChannelSampleRate(unsigned int)));
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));

@@ -55,13 +55,9 @@ DOA2Baseband::DOA2Baseband(int fftSize) :
         m_sizes[i] = 0;
     }
 
-    QObject::connect(
-        &m_sampleMIFifo,
-        &SampleMIFifo::dataSyncReady,
-        this,
-        &DOA2Baseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleMIFifo.setDataSyncReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
     m_lastStream = 0;

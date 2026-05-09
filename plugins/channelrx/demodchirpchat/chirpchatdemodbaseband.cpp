@@ -31,13 +31,9 @@ ChirpChatDemodBaseband::ChirpChatDemodBaseband() :
     m_sampleFifo.setSize(SampleSinkFifo::getSizePolicy(48000));
 
     qDebug("ChirpChatDemodBaseband::ChirpChatDemodBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &ChirpChatDemodBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }

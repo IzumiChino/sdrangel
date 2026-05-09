@@ -35,13 +35,9 @@ LocalSourceBaseband::LocalSourceBaseband() :
     m_channelizer = new UpChannelizer(&m_source);
 
     qDebug("LocalSourceBaseband::LocalSourceBaseband");
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSourceFifo::dataRead,
-        this,
-        &LocalSourceBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
 }

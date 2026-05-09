@@ -55,13 +55,9 @@ void SigMFFileSinkBaseband::reset()
 void SigMFFileSinkBaseband::startWork()
 {
     QMutexLocker mutexLocker(&m_mutex);
-    QObject::connect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &SigMFFileSinkBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleFifo.setDataReadyCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
     QObject::connect(
         &m_inputMessageQueue,
         &MessageQueue::messageEnqueued,
@@ -88,12 +84,7 @@ void SigMFFileSinkBaseband::stopWork()
         this,
         &SigMFFileSinkBaseband::handleInputMessages
     );
-    QObject::disconnect(
-        &m_sampleFifo,
-        &SampleSinkFifo::dataReady,
-        this,
-        &SigMFFileSinkBaseband::handleData
-    );
+    m_sampleFifo.setDataReadyCallback({});
     QObject::disconnect(
         m_timer,
         &QTimer::timeout,

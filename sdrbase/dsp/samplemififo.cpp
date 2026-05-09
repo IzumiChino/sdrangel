@@ -20,7 +20,7 @@
 
 void SampleMIFifo::init(unsigned int nbStreams, unsigned int size)
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     m_nbStreams = nbStreams;
     m_size = size;
 	m_fill = 0;
@@ -39,7 +39,7 @@ void SampleMIFifo::init(unsigned int nbStreams, unsigned int size)
 
 void SampleMIFifo::reset()
 {
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 	m_fill = 0;
 	m_head = 0;
     for (unsigned int stream = 0; stream < m_nbStreams; stream++)
@@ -49,8 +49,7 @@ void SampleMIFifo::reset()
     }
 }
 
-SampleMIFifo::SampleMIFifo(QObject *parent) :
-    QObject(parent),
+SampleMIFifo::SampleMIFifo() :
     m_nbStreams(0),
     m_size(0),
     m_fill(0),
@@ -58,8 +57,7 @@ SampleMIFifo::SampleMIFifo(QObject *parent) :
 {
 }
 
-SampleMIFifo::SampleMIFifo(unsigned int nbStreams, unsigned int size, QObject *parent) :
-    QObject(parent)
+SampleMIFifo::SampleMIFifo(unsigned int nbStreams, unsigned int size)
 {
     init(nbStreams, size);
 }
@@ -79,74 +77,88 @@ SampleMIFifo::~SampleMIFifo()
 
 void SampleMIFifo::writeSync(const quint8* data, unsigned int count)
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int spaceLeft = m_size - m_fill;
-    unsigned int size = count / sizeof(Sample);
+    std::function<void()> dataSyncReadyCallback;
 
-    if (size > m_size)
     {
-        qWarning("SampleMIFifo::writeSync: input size %u greater that FIFO size %u: truncating input", size, m_size);
-        size = m_size;
-        count = m_size * sizeof(Sample);
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        unsigned int spaceLeft = m_size - m_fill;
+        unsigned int size = count / sizeof(Sample);
+
+        if (size > m_size)
+        {
+            qWarning("SampleMIFifo::writeSync: input size %u greater that FIFO size %u: truncating input", size, m_size);
+            size = m_size;
+            count = m_size * sizeof(Sample);
+        }
+
+        for (unsigned int stream = 0; stream < m_data.size(); stream++)
+        {
+            if (size <= spaceLeft)
+            {
+                std::copy(&data[stream*count], &data[stream*count] + count, m_data[stream].begin() + m_fill);
+                m_fill += size;
+            }
+            else
+            {
+                unsigned int remaining = size - spaceLeft;
+                unsigned int bytesLeft = spaceLeft*sizeof(Sample);
+                std::copy(&data[stream*count], &data[stream*count] + bytesLeft, m_data[stream].begin() + m_fill);
+                std::copy(&data[stream*count] + bytesLeft, &data[stream*count] + count, m_data[stream].begin());
+                m_fill = remaining;
+            }
+        }
+
+        dataSyncReadyCallback = m_dataSyncReadyCallback;
+    }
+    if (dataSyncReadyCallback) {
+	    dataSyncReadyCallback();
+    }
+}
+
+void SampleMIFifo::writeSync(const std::vector<SampleVector::const_iterator>& vbegin, unsigned int size)
+{
+    std::function<void()> dataSyncReadyCallback;
+
+    if ((m_data.size() == 0) || (m_data.size() != vbegin.size())) {
+        return;
     }
 
-    for (unsigned int stream = 0; stream < m_data.size(); stream++)
     {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        unsigned int spaceLeft = m_size - m_fill;
+
+        if (size > m_size)
+        {
+            qWarning("SampleMIFifo::writeSync: input size %u greater that FIFO size %u: truncating input", size, m_size);
+            size = m_size;
+        }
+
         if (size <= spaceLeft)
         {
-            std::copy(&data[stream*count], &data[stream*count] + count, m_data[stream].begin() + m_fill);
+            for (unsigned int stream = 0; stream < m_data.size(); stream++) {
+                std::copy(vbegin[stream], vbegin[stream] + size, m_data[stream].begin() + m_fill);
+            }
+
             m_fill += size;
         }
         else
         {
             unsigned int remaining = size - spaceLeft;
-            unsigned int bytesLeft = spaceLeft*sizeof(Sample);
-            std::copy(&data[stream*count], &data[stream*count] + bytesLeft, m_data[stream].begin() + m_fill);
-            std::copy(&data[stream*count] + bytesLeft, &data[stream*count] + count, m_data[stream].begin());
+
+            for (unsigned int stream = 0; stream < m_data.size(); stream++)
+            {
+                std::copy(vbegin[stream], vbegin[stream] + spaceLeft, m_data[stream].begin() + m_fill);
+                std::copy(vbegin[stream] + spaceLeft, vbegin[stream] + size, m_data[stream].begin());
+            }
+
             m_fill = remaining;
         }
+
+        dataSyncReadyCallback = m_dataSyncReadyCallback;
     }
-
-    emit dataSyncReady();
-}
-
-void SampleMIFifo::writeSync(const std::vector<SampleVector::const_iterator>& vbegin, unsigned int size)
-{
-    if ((m_data.size() == 0) || (m_data.size() != vbegin.size())) {
-        return;
+    if (dataSyncReadyCallback) {
+	    dataSyncReadyCallback();
     }
-
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int spaceLeft = m_size - m_fill;
-
-    if (size > m_size)
-    {
-        qWarning("SampleMIFifo::writeSync: input size %u greater that FIFO size %u: truncating input", size, m_size);
-        size = m_size;
-    }
-
-    if (size <= spaceLeft)
-    {
-        for (unsigned int stream = 0; stream < m_data.size(); stream++) {
-            std::copy(vbegin[stream], vbegin[stream] + size, m_data[stream].begin() + m_fill);
-        }
-
-        m_fill += size;
-    }
-    else
-    {
-        unsigned int remaining = size - spaceLeft;
-
-        for (unsigned int stream = 0; stream < m_data.size(); stream++)
-        {
-            std::copy(vbegin[stream], vbegin[stream] + spaceLeft, m_data[stream].begin() + m_fill);
-            std::copy(vbegin[stream] + spaceLeft, vbegin[stream] + size, m_data[stream].begin());
-        }
-
-        m_fill = remaining;
-    }
-
-    emit dataSyncReady();
 }
 
 void SampleMIFifo::readSync(
@@ -158,7 +170,7 @@ void SampleMIFifo::readSync(
         return;
     }
 
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     vpart1Begin.resize(m_nbStreams);
     vpart1End.resize(m_nbStreams);
     vpart2Begin.resize(m_nbStreams);
@@ -197,7 +209,7 @@ void SampleMIFifo::readSync(
         return;
     }
 
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     vpart1Begin.resize(m_nbStreams);
     vpart1End.resize(m_nbStreams);
     vpart2Begin.resize(m_nbStreams);
@@ -237,7 +249,7 @@ void SampleMIFifo::readSync(
         return;
     }
 
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     if (m_head < m_fill)
     {
@@ -259,67 +271,81 @@ void SampleMIFifo::readSync(
 
 void SampleMIFifo::writeAsync(const quint8* data, unsigned int count, unsigned int stream)
 {
+    std::function<void(int)> dataAsyncReadyCallback;
+
     if (stream >= m_nbStreams) {
         return;
     }
 
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int spaceLeft = m_size - m_vFill[stream];
-    unsigned int size = count / sizeof(Sample);
-
-    if (size > m_size)
     {
-        qWarning("SampleMIFifo::writeAsync: input size %u greater that FIFO size %u: truncating input", size, m_size);
-        size = m_size;
-        count = m_size * sizeof(Sample);
-    }
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        unsigned int spaceLeft = m_size - m_vFill[stream];
+        unsigned int size = count / sizeof(Sample);
 
-    if (size <= spaceLeft)
-    {
-        std::copy(&data[stream*count], &data[stream*count] + count, m_data[stream].begin() + m_vFill[stream]);
-        m_vFill[stream] += size;
-    }
-    else
-    {
-        unsigned int remaining = size - spaceLeft;
-        unsigned int bytesLeft = spaceLeft * sizeof(Sample);
-        std::copy(&data[stream*count], &data[stream*count] + bytesLeft, m_data[stream].begin() + m_vFill[stream]);
-        std::copy(&data[stream*count] + bytesLeft, &data[stream*count] + count,  m_data[stream].begin());
-        m_vFill[stream] = remaining;
-    }
+        if (size > m_size)
+        {
+            qWarning("SampleMIFifo::writeAsync: input size %u greater that FIFO size %u: truncating input", size, m_size);
+            size = m_size;
+            count = m_size * sizeof(Sample);
+        }
 
-    emit dataAsyncReady(stream);
+        if (size <= spaceLeft)
+        {
+            std::copy(&data[stream*count], &data[stream*count] + count, m_data[stream].begin() + m_vFill[stream]);
+            m_vFill[stream] += size;
+        }
+        else
+        {
+            unsigned int remaining = size - spaceLeft;
+            unsigned int bytesLeft = spaceLeft * sizeof(Sample);
+            std::copy(&data[stream*count], &data[stream*count] + bytesLeft, m_data[stream].begin() + m_vFill[stream]);
+            std::copy(&data[stream*count] + bytesLeft, &data[stream*count] + count,  m_data[stream].begin());
+            m_vFill[stream] = remaining;
+        }
+
+        dataAsyncReadyCallback = m_dataAsyncReadyCallback;
+    }
+    if (dataAsyncReadyCallback) {
+	    dataAsyncReadyCallback(static_cast<int>(stream));
+    }
 }
 
 void SampleMIFifo::writeAsync(const SampleVector::const_iterator& begin, unsigned int size, unsigned int stream)
 {
+    std::function<void(int)> dataAsyncReadyCallback;
+
     if (stream >= m_nbStreams) {
         return;
     }
 
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int spaceLeft = m_size < m_vFill[stream] ? 0 : m_size - m_vFill[stream];
-
-    if (size > m_size)
     {
-        qWarning("SampleMIFifo::writeAsync: input size %u greater that FIFO size %u: truncating input", size, m_size);
-        size = m_size;
-    }
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        unsigned int spaceLeft = m_size < m_vFill[stream] ? 0 : m_size - m_vFill[stream];
 
-    if (size <= spaceLeft)
-    {
-        std::copy(begin, begin + size, m_data[stream].begin() + m_vFill[stream]);
-        m_vFill[stream] += size;
-    }
-    else
-    {
-        unsigned int remaining = size - spaceLeft;
-        std::copy(begin, begin + spaceLeft, m_data[stream].begin() + m_vFill[stream]);
-        std::copy(begin + spaceLeft, begin + size,  m_data[stream].begin());
-        m_vFill[stream] = remaining;
-    }
+        if (size > m_size)
+        {
+            qWarning("SampleMIFifo::writeAsync: input size %u greater that FIFO size %u: truncating input", size, m_size);
+            size = m_size;
+        }
 
-    emit dataAsyncReady(stream);
+        if (size <= spaceLeft)
+        {
+            std::copy(begin, begin + size, m_data[stream].begin() + m_vFill[stream]);
+            m_vFill[stream] += size;
+        }
+        else
+        {
+            unsigned int remaining = size - spaceLeft;
+            std::copy(begin, begin + spaceLeft, m_data[stream].begin() + m_vFill[stream]);
+            std::copy(begin + spaceLeft, begin + size,  m_data[stream].begin());
+            m_vFill[stream] = remaining;
+        }
+
+        dataAsyncReadyCallback = m_dataAsyncReadyCallback;
+    }
+    if (dataAsyncReadyCallback) {
+	    dataAsyncReadyCallback(static_cast<int>(stream));
+    }
 }
 
 void SampleMIFifo::readAsync(
@@ -331,7 +357,7 @@ void SampleMIFifo::readAsync(
         return;
     }
 
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     if (m_vHead[stream] < m_vFill[stream])
     {
@@ -360,7 +386,7 @@ void SampleMIFifo::readAsync(
         return;
     }
 
-    QMutexLocker mutexLocker(&m_mutex);
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
     if (m_vHead[stream] < m_vFill[stream])
     {

@@ -39,13 +39,9 @@ BeamSteeringCWModBaseband::BeamSteeringCWModBaseband()
         m_sizes[i] = 0;
     }
 
-    QObject::connect(
-        &m_sampleMOFifo,
-        &SampleMOFifo::dataReadSync,
-        this,
-        &BeamSteeringCWModBaseband::handleData,
-        Qt::QueuedConnection
-    );
+    m_sampleMOFifo.setDataReadSyncCallback([this]() {
+        QMetaObject::invokeMethod(this, [this]() { handleData(); }, Qt::QueuedConnection);
+    });
 
     connect(&m_inputMessageQueue, SIGNAL(messageEnqueued()), this, SLOT(handleInputMessages()));
     m_lastStream = 0;

@@ -221,7 +221,7 @@ void WDSPRxSink::processOneSample(const Complex &ci, QList<ObjectPipe*>& dataPip
                 {
                     for (auto dataPipe : dataPipes)
                     {
-                        DataFifo *fifo = qobject_cast<DataFifo*>(dataPipe->m_element);
+                        DataFifo *fifo = getDataFifoFromPipeElement(dataPipe->m_element);
 
                         if (fifo)
                         {

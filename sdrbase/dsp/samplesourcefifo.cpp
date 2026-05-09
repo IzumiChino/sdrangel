@@ -20,118 +20,76 @@
 
 #include "samplesourcefifo.h"
 
-const unsigned int SampleSourceFifo::m_rwDivisor = 2;
-const unsigned int SampleSourceFifo::m_guardDivisor = 10;
+const unsigned int SampleSourceFifo::m_rwDivisor = SampleSourceFifoCore::kRwDivisor;
+const unsigned int SampleSourceFifo::m_guardDivisor = SampleSourceFifoCore::kGuardDivisor;
 
-SampleSourceFifo::SampleSourceFifo(QObject *parent) :
-    QObject(parent)
+SampleSourceFifo::SampleSourceFifo() = default;
+
+SampleSourceFifo::SampleSourceFifo(unsigned int size) :
+    m_core(size)
 {}
-
-SampleSourceFifo::SampleSourceFifo(unsigned int size, QObject *parent) :
-    QObject(parent)
-{
-    resize(size);
-}
 
 void SampleSourceFifo::resize(unsigned int size)
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    m_size = size;
-    m_lowGuard = m_size / m_guardDivisor;
-    m_highGuard = m_size - (m_size/m_guardDivisor);
-    m_midPoint = m_size / m_rwDivisor;
-	m_readCount = 0;
-    m_readHead = 0;
-    m_writeHead = m_midPoint;
-    m_data.resize(size);
+    m_core.setSize(size);
 }
 
 void SampleSourceFifo::reset()
 {
-    QMutexLocker mutexLocker(&m_mutex);
-	m_readCount = 0;
-    m_readHead = 0;
-    m_writeHead = m_midPoint;
+    m_core.reset();
 }
 
-SampleSourceFifo::~SampleSourceFifo()
-{}
+SampleSourceFifo::~SampleSourceFifo() = default;
 
 void SampleSourceFifo::read(
     unsigned int amount,
-    unsigned int& ipart1Begin, unsigned int& ipart1End, // first part offsets where to read
-    unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
-)
+    unsigned int& ipart1Begin, unsigned int& ipart1End,
+    unsigned int& ipart2Begin, unsigned int& ipart2End)
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int spaceLeft = m_size - m_readHead;
-    m_readCount = m_readCount + amount < m_size ? m_readCount + amount : m_size; // cannot exceed FIFO size
+    std::function<void()> dataReadCallback;
+    SampleFifoSlices slices;
+    m_core.read(amount, slices);
+    ipart1Begin = slices.part1Begin;
+    ipart1End = slices.part1End;
+    ipart2Begin = slices.part2Begin;
+    ipart2End = slices.part2End;
 
-    if (amount <= spaceLeft)
     {
-        ipart1Begin = m_readHead;
-        ipart1End = m_readHead + amount;
-        ipart2Begin = m_size;
-        ipart2End = m_size;
-        m_readHead += amount;
-    }
-    else
-    {
-        unsigned int remaining = (amount < m_size ? amount : m_size) - spaceLeft;
-        ipart1Begin = m_readHead;
-        ipart1End = m_size;
-        ipart2Begin = 0;
-        ipart2End = remaining;
-        m_readHead = remaining;
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        dataReadCallback = m_dataReadCallback;
     }
 
-    emit dataRead();
+    if (dataReadCallback) {
+	    dataReadCallback();
+    }
 }
 
 void SampleSourceFifo::write(
     unsigned int amount,
-    unsigned int& ipart1Begin, unsigned int& ipart1End, // first part offsets where to write
-    unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
-)
+    unsigned int& ipart1Begin, unsigned int& ipart1End,
+    unsigned int& ipart2Begin, unsigned int& ipart2End)
 {
-    QMutexLocker mutexLocker(&m_mutex);
-    unsigned int rwDelta = m_writeHead >= m_readHead ? m_writeHead - m_readHead : m_size - (m_readHead - m_writeHead);
+    SampleFifoSlices slices;
+    const auto correction = m_core.write(amount, slices);
 
-    if (rwDelta < m_lowGuard)
+    if (correction == SampleSourceFifoCore::WriteCorrection::Underrun)
     {
-        qWarning("SampleSourceFifo::write: underrun (write too slow) using %d old samples", m_midPoint - m_lowGuard);
-        m_writeHead = m_readHead + m_midPoint < m_size ? m_readHead + m_midPoint : m_readHead + m_midPoint - m_size;
+        qWarning("SampleSourceFifo::write: underrun (write too slow) using %d old samples",
+            static_cast<int>(m_core.midPoint() - m_core.lowGuard()));
     }
-    else if (rwDelta > m_highGuard)
+    else if (correction == SampleSourceFifoCore::WriteCorrection::Overrun)
     {
-        qWarning("SampleSourceFifo::write: overrun (read too slow) dropping %d samples", m_highGuard - m_midPoint);
-        m_writeHead = m_readHead + m_midPoint < m_size ? m_readHead + m_midPoint : m_readHead + m_midPoint - m_size;
-    }
-
-    unsigned int spaceLeft = m_size - m_writeHead;
-
-    if (amount <= spaceLeft)
-    {
-        ipart1Begin = m_writeHead;
-        ipart1End = m_writeHead + amount;
-        ipart2Begin = m_size;
-        ipart2End = m_size;
-        m_writeHead += amount;
-    }
-    else
-    {
-        unsigned int remaining = (amount < m_size ? amount : m_size) - spaceLeft;
-        ipart1Begin = m_writeHead;
-        ipart1End = m_size;
-        ipart2Begin = 0;
-        ipart2End = remaining;
-        m_writeHead = remaining;
+        qWarning("SampleSourceFifo::write: overrun (read too slow) dropping %d samples",
+            static_cast<int>(m_core.highGuard() - m_core.midPoint()));
     }
 
-    m_readCount = amount < m_readCount ? m_readCount - amount : 0; // cannot be less than 0
+    ipart1Begin = slices.part1Begin;
+    ipart1End = slices.part1End;
+    ipart2Begin = slices.part2Begin;
+    ipart2End = slices.part2End;
 }
 
 unsigned int SampleSourceFifo::getSizePolicy(unsigned int sampleRate)
 {
-    return (sampleRate/100)*64; // .64s
+    return (sampleRate / 100) * 64; // .64s
 }
