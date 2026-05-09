@@ -227,10 +227,6 @@ uint32_t AudioFifo::writeOne(const quint8* data)
 	}
 
 	return 1;
-
-	if (overflowCallback) {
-		overflowCallback(1);
-	}
 }
 
 uint AudioFifo::drain(uint32_t numSamples)

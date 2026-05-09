@@ -27,42 +27,43 @@ public:
 
     SampleSinkFifoCore(const SampleSinkFifoCore& other)
     {
-        std::lock_guard<std::mutex> lock(other.m_adminMutex);
+        std::lock_guard<std::mutex> lock(other.m_mutex);
         m_data = other.m_data;
         m_size = other.m_size;
-        m_tail.store(other.m_tail.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        m_head.store(other.m_head.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        m_tail = other.m_tail;
+        m_head = other.m_head;
         m_readBeginHead = other.m_readBeginHead;
     }
 
     void setSize(unsigned int size)
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_data.resize(size);
         m_size = static_cast<unsigned int>(m_data.size());
-        m_tail.store(0, std::memory_order_relaxed);
-        m_head.store(0, std::memory_order_relaxed);
+        m_tail = 0;
+        m_head = 0;
         m_readBeginHead = 0;
     }
 
     void reset()
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
-        m_tail.store(0, std::memory_order_relaxed);
-        m_head.store(0, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_tail = 0;
+        m_head = 0;
         m_readBeginHead = 0;
     }
 
     unsigned int size() const
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         return m_size;
     }
 
     unsigned int fill() const
     {
-        const unsigned int tail = m_tail.load(std::memory_order_acquire);
-        const unsigned int head = m_head.load(std::memory_order_acquire);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const unsigned int tail = m_tail;
+        const unsigned int head = m_head;
         return tail - head;
     }
 
@@ -78,12 +79,14 @@ public:
 
     unsigned int write(const Sample* begin, unsigned int count)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
         if (m_size == 0) {
             return 0;
         }
 
-        const unsigned int head = m_head.load(std::memory_order_acquire);
-        const unsigned int tail = m_tail.load(std::memory_order_relaxed);
+        const unsigned int head = m_head;
+        const unsigned int tail = m_tail;
         const unsigned int currentFill = tail - head;
         const unsigned int space = m_size - currentFill;
         const unsigned int total = std::min(count, space);
@@ -105,19 +108,21 @@ public:
             std::copy(begin + toEnd, begin + total, m_data.begin());
         }
 
-        m_tail.store(tail + total, std::memory_order_release);
+        m_tail = tail + total;
         return total;
     }
 
     unsigned int write(SampleVector::const_iterator begin, SampleVector::const_iterator end)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
         if (m_size == 0) {
             return 0;
         }
 
         const unsigned int count = static_cast<unsigned int>(end - begin);
-        const unsigned int head = m_head.load(std::memory_order_acquire);
-        const unsigned int tail = m_tail.load(std::memory_order_relaxed);
+        const unsigned int head = m_head;
+        const unsigned int tail = m_tail;
         const unsigned int currentFill = tail - head;
         const unsigned int space = m_size - currentFill;
         const unsigned int total = std::min(count, space);
@@ -139,19 +144,21 @@ public:
             std::copy(begin + toEnd, begin + total, m_data.begin());
         }
 
-        m_tail.store(tail + total, std::memory_order_release);
+        m_tail = tail + total;
         return total;
     }
 
     unsigned int read(SampleVector::iterator begin, SampleVector::iterator end)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
         if (m_size == 0) {
             return 0;
         }
 
         const unsigned int count = static_cast<unsigned int>(end - begin);
-        const unsigned int tail = m_tail.load(std::memory_order_acquire);
-        const unsigned int head = m_head.load(std::memory_order_relaxed);
+        const unsigned int tail = m_tail;
+        const unsigned int head = m_head;
         const unsigned int currentFill = tail - head;
         const unsigned int total = std::min(count, currentFill);
 
@@ -172,23 +179,26 @@ public:
             std::copy(m_data.begin(), m_data.begin() + (total - toEnd), begin + toEnd);
         }
 
-        m_head.store(head + total, std::memory_order_release);
+        m_head = head + total;
         return total;
     }
 
     unsigned int readBegin(unsigned int count, SampleFifoSlices& slices)
     {
+        m_readBeginGuard = std::unique_lock<std::mutex>(m_mutex);
+
         if (m_size == 0)
         {
             slices.part1Begin = m_size;
             slices.part1End = m_size;
             slices.part2Begin = m_size;
             slices.part2End = m_size;
+            m_readBeginGuard.unlock();
             return 0;
         }
 
-        const unsigned int tail = m_tail.load(std::memory_order_acquire);
-        const unsigned int head = m_head.load(std::memory_order_relaxed);
+        const unsigned int tail = m_tail;
+        const unsigned int head = m_head;
         const unsigned int currentFill = tail - head;
         const unsigned int total = std::min(count, currentFill);
         unsigned int pos = head % m_size;
@@ -220,11 +230,16 @@ public:
 
     unsigned int readCommit(unsigned int count)
     {
-        if (m_size == 0) {
+        if (!m_readBeginGuard.owns_lock()) {
             return 0;
         }
 
-        const unsigned int tail = m_tail.load(std::memory_order_acquire);
+        if (m_size == 0) {
+            m_readBeginGuard.unlock();
+            return 0;
+        }
+
+        const unsigned int tail = m_tail;
         const unsigned int head = m_readBeginHead;
         const unsigned int currentFill = tail - head;
 
@@ -232,16 +247,18 @@ public:
             count = currentFill;
         }
 
-        m_head.store(head + count, std::memory_order_release);
+        m_head = head + count;
+        m_readBeginGuard.unlock();
         return count;
     }
 
 private:
-    mutable std::mutex m_adminMutex;
+    mutable std::mutex m_mutex;
+    mutable std::unique_lock<std::mutex> m_readBeginGuard;
     SampleVector m_data;
     unsigned int m_size = 0;
-    std::atomic<unsigned int> m_tail{0};
-    std::atomic<unsigned int> m_head{0};
+    unsigned int m_tail = 0;
+    unsigned int m_head = 0;
     unsigned int m_readBeginHead = 0;
 };
 
@@ -267,23 +284,23 @@ public:
 
     void setSize(unsigned int size)
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_size = size;
         m_lowGuard = m_size / kGuardDivisor;
         m_highGuard = m_size - (m_size / kGuardDivisor);
         m_midPoint = m_size / kRwDivisor;
-        m_readCount.store(0, std::memory_order_relaxed);
-        m_readHead.store(0, std::memory_order_relaxed);
-        m_writeHead.store(m_midPoint, std::memory_order_relaxed);
+        m_readCount = 0;
+        m_readHead = 0;
+        m_writeHead = m_midPoint;
         m_data.resize(size);
     }
 
     void reset()
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
-        m_readCount.store(0, std::memory_order_relaxed);
-        m_readHead.store(0, std::memory_order_relaxed);
-        m_writeHead.store(m_midPoint, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_readCount = 0;
+        m_readHead = 0;
+        m_writeHead = m_midPoint;
     }
 
     SampleVector& data()
@@ -298,17 +315,20 @@ public:
 
     unsigned int remainder() const
     {
-        return m_readCount.load(std::memory_order_acquire);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_readCount;
     }
 
     float getRWBalance() const
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
         if (m_size == 0) {
             return 0.0f;
         }
 
-        const unsigned int writeHead = m_writeHead.load(std::memory_order_acquire);
-        const unsigned int readHead = m_readHead.load(std::memory_order_acquire);
+        const unsigned int writeHead = m_writeHead;
+        const unsigned int readHead = m_readHead;
         int delta;
         if (writeHead > readHead) {
             delta = static_cast<int>(m_size / kRwDivisor) - static_cast<int>(writeHead - readHead);
@@ -321,30 +341,32 @@ public:
 
     unsigned int size() const
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         return m_size;
     }
 
     unsigned int lowGuard() const
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         return m_lowGuard;
     }
 
     unsigned int highGuard() const
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         return m_highGuard;
     }
 
     unsigned int midPoint() const
     {
-        std::lock_guard<std::mutex> lock(m_adminMutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         return m_midPoint;
     }
 
     void read(unsigned int amount, SampleFifoSlices& slices)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
         if (m_size == 0)
         {
             slices.part1Begin = 0;
@@ -354,11 +376,11 @@ public:
             return;
         }
 
-        unsigned int readHead = m_readHead.load(std::memory_order_relaxed);
+        unsigned int readHead = m_readHead;
         const unsigned int spaceLeft = m_size - readHead;
-        const unsigned int oldCount = m_readCount.load(std::memory_order_relaxed);
+        const unsigned int oldCount = m_readCount;
         const unsigned int newCount = oldCount + amount < m_size ? oldCount + amount : m_size;
-        m_readCount.store(newCount, std::memory_order_release);
+        m_readCount = newCount;
 
         if (amount <= spaceLeft)
         {
@@ -378,11 +400,13 @@ public:
             readHead = remaining;
         }
 
-        m_readHead.store(readHead, std::memory_order_release);
+        m_readHead = readHead;
     }
 
     WriteCorrection write(unsigned int amount, SampleFifoSlices& slices)
     {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
         if (m_size == 0)
         {
             slices.part1Begin = 0;
@@ -392,8 +416,8 @@ public:
             return WriteCorrection::None;
         }
 
-        const unsigned int readHead = m_readHead.load(std::memory_order_acquire);
-        unsigned int writeHead = m_writeHead.load(std::memory_order_relaxed);
+        const unsigned int readHead = m_readHead;
+        unsigned int writeHead = m_writeHead;
         const unsigned int rwDelta = writeHead >= readHead ?
             writeHead - readHead :
             m_size - (readHead - writeHead);
@@ -435,22 +459,22 @@ public:
             writeHead = remaining;
         }
 
-        const unsigned int readCount = m_readCount.load(std::memory_order_acquire);
-        m_readCount.store(amount < readCount ? readCount - amount : 0, std::memory_order_release);
-        m_writeHead.store(writeHead, std::memory_order_release);
+        const unsigned int readCount = m_readCount;
+        m_readCount = amount < readCount ? readCount - amount : 0;
+        m_writeHead = writeHead;
         return correction;
     }
 
 private:
-    mutable std::mutex m_adminMutex;
+    mutable std::mutex m_mutex;
     SampleVector m_data;
     unsigned int m_size = 0;
     unsigned int m_lowGuard = 0;
     unsigned int m_highGuard = 0;
     unsigned int m_midPoint = 0;
-    std::atomic<unsigned int> m_readHead{0};
-    std::atomic<unsigned int> m_writeHead{0};
-    std::atomic<unsigned int> m_readCount{0};
+    unsigned int m_readHead = 0;
+    unsigned int m_writeHead = 0;
+    unsigned int m_readCount = 0;
 };
 
 #endif // SDRBASE_DSP_SAMPLEFIFOCORE_H_
