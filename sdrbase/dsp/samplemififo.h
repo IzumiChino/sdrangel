@@ -35,8 +35,14 @@ public:
     ~SampleMIFifo();
     void init(unsigned int nbStreams, unsigned int size);
     void reset();
-    void setDataSyncReadyCallback(std::function<void()> callback) { m_dataSyncReadyCallback = std::move(callback); }
-    void setDataAsyncReadyCallback(std::function<void(int)> callback) { m_dataAsyncReadyCallback = std::move(callback); }
+    void setDataSyncReadyCallback(std::function<void()> callback) {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_dataSyncReadyCallback = std::move(callback);
+    }
+    void setDataAsyncReadyCallback(std::function<void(int)> callback) {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_dataAsyncReadyCallback = std::move(callback);
+    }
 
     void writeSync(const quint8* data, unsigned int count); //!< de-interleaved data in input with count bytes for each stream
     void writeSync(const std::vector<SampleVector::const_iterator>& vbegin, unsigned int size);

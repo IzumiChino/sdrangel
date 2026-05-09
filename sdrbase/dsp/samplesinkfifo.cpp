@@ -70,6 +70,12 @@ void SampleSinkFifo::setWrittenSignalRateDivider(unsigned int divider)
 
 unsigned int SampleSinkFifo::write(const quint8* data, unsigned int count)
 {
+    std::function<void()> dataReadyCallback;
+    std::function<void(int)> overflowCallback;
+    std::function<void(int, qint64)> writtenCallback;
+    int writtenTotal = 0;
+    qint64 writtenElapsed = 0;
+
     if (m_core.size() == 0) {
         return 0;
     }
@@ -87,8 +93,12 @@ unsigned int SampleSinkFifo::write(const quint8* data, unsigned int count)
             m_msgRateTimer = std::chrono::steady_clock::now();
             qCritical("SampleSinkFifo::write: (%s) overflow - dropping %u samples",
                 qPrintable(m_label), count - total);
-            if (m_overflowCallback) {
-                m_overflowCallback(static_cast<int>(count - total));
+            {
+                std::lock_guard<std::mutex> lock(m_callbackMutex);
+                overflowCallback = m_overflowCallback;
+            }
+            if (overflowCallback) {
+	            overflowCallback(static_cast<int>(count - total));
             }
         }
         else
@@ -101,8 +111,12 @@ unsigned int SampleSinkFifo::write(const quint8* data, unsigned int count)
                 qCritical("SampleSinkFifo::write: (%s) %u messages dropped", qPrintable(m_label), m_suppressed);
                 qCritical("SampleSinkFifo::write: (%s) overflow - dropping %u samples",
                     qPrintable(m_label), count - total);
-                if (m_overflowCallback) {
-                    m_overflowCallback(static_cast<int>(count - total));
+                {
+                    std::lock_guard<std::mutex> lock(m_callbackMutex);
+                    overflowCallback = m_overflowCallback;
+                }
+                if (overflowCallback) {
+	                overflowCallback(static_cast<int>(count - total));
                 }
                 m_suppressed = -1;
             }
@@ -113,16 +127,27 @@ unsigned int SampleSinkFifo::write(const quint8* data, unsigned int count)
         }
     }
 
-    if (notifyDataReady && m_dataReadyCallback) {
-        m_dataReadyCallback();
+    if (notifyDataReady) {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        dataReadyCallback = m_dataReadyCallback;
+    }
+
+    if (notifyDataReady && dataReadyCallback) {
+	    dataReadyCallback();
     }
 
     m_total += static_cast<int>(total);
 
     if (++m_writtenSignalCount >= m_writtenSignalRateDivider)
     {
-        if (m_writtenCallback) {
-            m_writtenCallback(m_total, MainCore::instance()->getElapsedNsecs());
+        writtenTotal = m_total;
+        writtenElapsed = MainCore::instance()->getElapsedNsecs();
+        {
+            std::lock_guard<std::mutex> lock(m_callbackMutex);
+            writtenCallback = m_writtenCallback;
+        }
+        if (writtenCallback) {
+	        writtenCallback(writtenTotal, writtenElapsed);
         }
         m_total = 0;
         m_writtenSignalCount = 0;
@@ -133,6 +158,12 @@ unsigned int SampleSinkFifo::write(const quint8* data, unsigned int count)
 
 unsigned int SampleSinkFifo::write(SampleVector::const_iterator begin, SampleVector::const_iterator end)
 {
+    std::function<void()> dataReadyCallback;
+    std::function<void(int)> overflowCallback;
+    std::function<void(int, qint64)> writtenCallback;
+    int writtenTotal = 0;
+    qint64 writtenElapsed = 0;
+
     if (m_core.size() == 0) {
         return 0;
     }
@@ -149,8 +180,12 @@ unsigned int SampleSinkFifo::write(SampleVector::const_iterator begin, SampleVec
             m_msgRateTimer = std::chrono::steady_clock::now();
             qCritical("SampleSinkFifo::write: (%s) overflow - dropping %u samples",
                 qPrintable(m_label), count - total);
-            if (m_overflowCallback) {
-                m_overflowCallback(static_cast<int>(count - total));
+            {
+                std::lock_guard<std::mutex> lock(m_callbackMutex);
+                overflowCallback = m_overflowCallback;
+            }
+            if (overflowCallback) {
+	            overflowCallback(static_cast<int>(count - total));
             }
         }
         else
@@ -163,8 +198,12 @@ unsigned int SampleSinkFifo::write(SampleVector::const_iterator begin, SampleVec
                 qCritical("SampleSinkFifo::write: (%s) %u messages dropped", qPrintable(m_label), m_suppressed);
                 qCritical("SampleSinkFifo::write: (%s) overflow - dropping %u samples",
                     qPrintable(m_label), count - total);
-                if (m_overflowCallback) {
-                    m_overflowCallback(static_cast<int>(count - total));
+                {
+                    std::lock_guard<std::mutex> lock(m_callbackMutex);
+                    overflowCallback = m_overflowCallback;
+                }
+                if (overflowCallback) {
+	                overflowCallback(static_cast<int>(count - total));
                 }
                 m_suppressed = -1;
             }
@@ -175,16 +214,27 @@ unsigned int SampleSinkFifo::write(SampleVector::const_iterator begin, SampleVec
         }
     }
 
-    if (notifyDataReady && m_dataReadyCallback) {
-        m_dataReadyCallback();
+    if (notifyDataReady) {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        dataReadyCallback = m_dataReadyCallback;
+    }
+
+    if (notifyDataReady && dataReadyCallback) {
+	    dataReadyCallback();
     }
 
     m_total += static_cast<int>(total);
 
     if (++m_writtenSignalCount >= m_writtenSignalRateDivider)
     {
-        if (m_writtenCallback) {
-            m_writtenCallback(m_total, MainCore::instance()->getElapsedNsecs());
+        writtenTotal = m_total;
+        writtenElapsed = MainCore::instance()->getElapsedNsecs();
+        {
+            std::lock_guard<std::mutex> lock(m_callbackMutex);
+            writtenCallback = m_writtenCallback;
+        }
+        if (writtenCallback) {
+	        writtenCallback(writtenTotal, writtenElapsed);
         }
         m_total = 0;
         m_writtenSignalCount = 0;
@@ -195,6 +245,8 @@ unsigned int SampleSinkFifo::write(SampleVector::const_iterator begin, SampleVec
 
 unsigned int SampleSinkFifo::read(SampleVector::iterator begin, SampleVector::iterator end)
 {
+    std::function<void(int)> underflowCallback;
+
     if (m_core.size() == 0) {
         return 0;
     }
@@ -206,8 +258,12 @@ unsigned int SampleSinkFifo::read(SampleVector::iterator begin, SampleVector::it
     {
         qCritical("SampleSinkFifo::read: (%s) underflow - missing %u samples",
             qPrintable(m_label), count - total);
-        if (m_underflowCallback) {
-            m_underflowCallback(static_cast<int>(count - total));
+        {
+            std::lock_guard<std::mutex> lock(m_callbackMutex);
+            underflowCallback = m_underflowCallback;
+        }
+        if (underflowCallback) {
+	        underflowCallback(static_cast<int>(count - total));
         }
     }
 
@@ -218,6 +274,7 @@ unsigned int SampleSinkFifo::readBegin(unsigned int count,
     SampleVector::iterator* part1Begin, SampleVector::iterator* part1End,
     SampleVector::iterator* part2Begin, SampleVector::iterator* part2End)
 {
+    std::function<void(int)> underflowCallback;
     auto& data = m_core.data();
 
     if (m_core.size() == 0) {
@@ -235,8 +292,12 @@ unsigned int SampleSinkFifo::readBegin(unsigned int count,
     {
         qCritical("SampleSinkFifo::readBegin: (%s) underflow - missing %u samples",
             qPrintable(m_label), count - total);
-        if (m_underflowCallback) {
-            m_underflowCallback(static_cast<int>(count - total));
+        {
+            std::lock_guard<std::mutex> lock(m_callbackMutex);
+            underflowCallback = m_underflowCallback;
+        }
+        if (underflowCallback) {
+	        underflowCallback(static_cast<int>(count - total));
         }
     }
 

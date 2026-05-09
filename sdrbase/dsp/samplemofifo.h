@@ -86,8 +86,14 @@ public:
     static unsigned int getSizePolicy(unsigned int sampleRate);
     static const unsigned int m_rwDivisor;
     static const unsigned int m_guardDivisor;
-    void setDataReadSyncCallback(std::function<void()> callback) { m_dataReadSyncCallback = std::move(callback); }
-    void setDataReadAsyncCallback(std::function<void(int)> callback) { m_dataReadAsyncCallback = std::move(callback); }
+    void setDataReadSyncCallback(std::function<void()> callback) {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_dataReadSyncCallback = std::move(callback);
+    }
+    void setDataReadAsyncCallback(std::function<void(int)> callback) {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_dataReadAsyncCallback = std::move(callback);
+    }
 
 private:
     std::vector<SampleVector> m_data;

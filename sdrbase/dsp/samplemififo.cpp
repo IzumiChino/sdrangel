@@ -77,6 +77,8 @@ SampleMIFifo::~SampleMIFifo()
 
 void SampleMIFifo::writeSync(const quint8* data, unsigned int count)
 {
+    std::function<void()> dataSyncReadyCallback;
+
     {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         unsigned int spaceLeft = m_size - m_fill;
@@ -105,14 +107,18 @@ void SampleMIFifo::writeSync(const quint8* data, unsigned int count)
                 m_fill = remaining;
             }
         }
+
+        dataSyncReadyCallback = m_dataSyncReadyCallback;
     }
-    if (m_dataSyncReadyCallback) {
-        m_dataSyncReadyCallback();
+    if (dataSyncReadyCallback) {
+	    dataSyncReadyCallback();
     }
 }
 
 void SampleMIFifo::writeSync(const std::vector<SampleVector::const_iterator>& vbegin, unsigned int size)
 {
+    std::function<void()> dataSyncReadyCallback;
+
     if ((m_data.size() == 0) || (m_data.size() != vbegin.size())) {
         return;
     }
@@ -147,9 +153,11 @@ void SampleMIFifo::writeSync(const std::vector<SampleVector::const_iterator>& vb
 
             m_fill = remaining;
         }
+
+        dataSyncReadyCallback = m_dataSyncReadyCallback;
     }
-    if (m_dataSyncReadyCallback) {
-        m_dataSyncReadyCallback();
+    if (dataSyncReadyCallback) {
+	    dataSyncReadyCallback();
     }
 }
 
@@ -263,6 +271,8 @@ void SampleMIFifo::readSync(
 
 void SampleMIFifo::writeAsync(const quint8* data, unsigned int count, unsigned int stream)
 {
+    std::function<void(int)> dataAsyncReadyCallback;
+
     if (stream >= m_nbStreams) {
         return;
     }
@@ -292,14 +302,18 @@ void SampleMIFifo::writeAsync(const quint8* data, unsigned int count, unsigned i
             std::copy(&data[stream*count] + bytesLeft, &data[stream*count] + count,  m_data[stream].begin());
             m_vFill[stream] = remaining;
         }
+
+        dataAsyncReadyCallback = m_dataAsyncReadyCallback;
     }
-    if (m_dataAsyncReadyCallback) {
-        m_dataAsyncReadyCallback(static_cast<int>(stream));
+    if (dataAsyncReadyCallback) {
+	    dataAsyncReadyCallback(static_cast<int>(stream));
     }
 }
 
 void SampleMIFifo::writeAsync(const SampleVector::const_iterator& begin, unsigned int size, unsigned int stream)
 {
+    std::function<void(int)> dataAsyncReadyCallback;
+
     if (stream >= m_nbStreams) {
         return;
     }
@@ -326,9 +340,11 @@ void SampleMIFifo::writeAsync(const SampleVector::const_iterator& begin, unsigne
             std::copy(begin + spaceLeft, begin + size,  m_data[stream].begin());
             m_vFill[stream] = remaining;
         }
+
+        dataAsyncReadyCallback = m_dataAsyncReadyCallback;
     }
-    if (m_dataAsyncReadyCallback) {
-        m_dataAsyncReadyCallback(static_cast<int>(stream));
+    if (dataAsyncReadyCallback) {
+	    dataAsyncReadyCallback(static_cast<int>(stream));
     }
 }
 

@@ -46,10 +46,29 @@ public:
 
 	uint32_t drain(uint32_t numSamples);
 	void clear();
-    void setDataReadyCallback(std::function<void()> callback) { m_dataReadyCallback = std::move(callback); }
-    void setOverflowCallback(std::function<void(int)> callback) { m_overflowCallback = std::move(callback); }
-    void setUnderflowCallback(std::function<void()> callback) { m_underflowCallback = std::move(callback); }
-	void notifyUnderflow() { if (m_underflowCallback) { m_underflowCallback(); } }
+	void setDataReadyCallback(std::function<void()> callback) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_dataReadyCallback = std::move(callback);
+	}
+	void setOverflowCallback(std::function<void(int)> callback) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_overflowCallback = std::move(callback);
+	}
+	void setUnderflowCallback(std::function<void()> callback) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_underflowCallback = std::move(callback);
+	}
+	void notifyUnderflow() {
+		std::function<void()> underflowCallback;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			underflowCallback = m_underflowCallback;
+		}
+
+		if (underflowCallback) {
+			underflowCallback();
+		}
+	}
 
 	inline uint32_t flush() { return drain(m_fill); }
 	inline uint32_t fill() const { return m_fill; }

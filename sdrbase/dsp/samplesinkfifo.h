@@ -23,6 +23,7 @@
 
 #include <chrono>
 #include <functional>
+#include <mutex>
 
 #include <QString>
 #include <QtGlobal>
@@ -43,6 +44,7 @@ private:
     std::function<void(int)> m_overflowCallback;
     std::function<void(int)> m_underflowCallback;
     std::function<void(int, qint64)> m_writtenCallback;
+	mutable std::mutex m_callbackMutex;
 
 public:
 	SampleSinkFifo();
@@ -53,10 +55,22 @@ public:
 	bool setSize(int size);
     void reset();
 	void setWrittenSignalRateDivider(unsigned int divider);
-	void setDataReadyCallback(std::function<void()> callback) { m_dataReadyCallback = std::move(callback); }
-	void setOverflowCallback(std::function<void(int)> callback) { m_overflowCallback = std::move(callback); }
-	void setUnderflowCallback(std::function<void(int)> callback) { m_underflowCallback = std::move(callback); }
-	void setWrittenCallback(std::function<void(int, qint64)> callback) { m_writtenCallback = std::move(callback); }
+	void setDataReadyCallback(std::function<void()> callback) {
+		std::lock_guard<std::mutex> lock(m_callbackMutex);
+		m_dataReadyCallback = std::move(callback);
+	}
+	void setOverflowCallback(std::function<void(int)> callback) {
+		std::lock_guard<std::mutex> lock(m_callbackMutex);
+		m_overflowCallback = std::move(callback);
+	}
+	void setUnderflowCallback(std::function<void(int)> callback) {
+		std::lock_guard<std::mutex> lock(m_callbackMutex);
+		m_underflowCallback = std::move(callback);
+	}
+	void setWrittenCallback(std::function<void(int, qint64)> callback) {
+		std::lock_guard<std::mutex> lock(m_callbackMutex);
+		m_writtenCallback = std::move(callback);
+	}
 
 	inline unsigned int size() {
 		return m_core.size();

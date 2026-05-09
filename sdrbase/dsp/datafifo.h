@@ -45,7 +45,10 @@ public:
 
 	bool setSize(int size);
     void reset();
-    void setDataReadyCallback(std::function<void()> callback) { m_dataReadyCallback = std::move(callback); }
+	void setDataReadyCallback(std::function<void()> callback) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_dataReadyCallback = std::move(callback);
+	}
 	inline unsigned int size() const {
 		std::lock_guard<std::mutex> lock(m_mutex);
 		return m_size;

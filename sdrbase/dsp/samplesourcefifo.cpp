@@ -46,6 +46,7 @@ void SampleSourceFifo::read(
     unsigned int& ipart1Begin, unsigned int& ipart1End,
     unsigned int& ipart2Begin, unsigned int& ipart2End)
 {
+    std::function<void()> dataReadCallback;
     SampleFifoSlices slices;
     m_core.read(amount, slices);
     ipart1Begin = slices.part1Begin;
@@ -53,8 +54,13 @@ void SampleSourceFifo::read(
     ipart2Begin = slices.part2Begin;
     ipart2End = slices.part2End;
 
-    if (m_dataReadCallback) {
-        m_dataReadCallback();
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        dataReadCallback = m_dataReadCallback;
+    }
+
+    if (dataReadCallback) {
+	    dataReadCallback();
     }
 }
 

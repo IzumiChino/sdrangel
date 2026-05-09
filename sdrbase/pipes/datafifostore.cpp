@@ -45,7 +45,13 @@ QObject *DataFifoStore::createElement()
 
 void DataFifoStore::deleteElement(QObject *element)
 {
-    int i = m_dataFifos.indexOf(static_cast<DataPipeElement*>(element));
+    auto *fifoElement = dynamic_cast<DataPipeElement*>(element);
+
+    if (!fifoElement) {
+        return;
+    }
+
+    int i = m_dataFifos.indexOf(fifoElement);
 
     if (i >= 0)
     {
@@ -66,10 +72,12 @@ void DataFifoStore::deleteAllElements()
 
 DataFifo* getDataFifoFromPipeElement(QObject *element)
 {
-    return element ? static_cast<DataPipeElement*>(element)->getFifo() : nullptr;
+    auto *fifoElement = dynamic_cast<DataPipeElement*>(element);
+    return fifoElement ? fifoElement->getFifo() : nullptr;
 }
 
 const DataFifo* getDataFifoFromPipeElement(const QObject *element)
 {
-    return element ? static_cast<const DataPipeElement*>(element)->getFifo() : nullptr;
+    auto *fifoElement = dynamic_cast<const DataPipeElement*>(element);
+    return fifoElement ? fifoElement->getFifo() : nullptr;
 }

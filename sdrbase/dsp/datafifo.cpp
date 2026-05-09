@@ -85,6 +85,7 @@ unsigned int DataFifo::write(const quint8* data, unsigned int count, DataType da
 {
     unsigned int total = 0;
     bool notifyDataReady = false;
+    std::function<void()> dataReadyCallback;
 
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -144,10 +145,11 @@ unsigned int DataFifo::write(const quint8* data, unsigned int count, DataType da
         }
 
         notifyDataReady = m_fill > 0;
+        dataReadyCallback = m_dataReadyCallback;
     }
 
-    if (notifyDataReady && m_dataReadyCallback) {
-        m_dataReadyCallback();
+    if (notifyDataReady && dataReadyCallback) {
+	    dataReadyCallback();
     }
 
     return total;
@@ -157,67 +159,71 @@ unsigned int DataFifo::write(QByteArray::const_iterator begin, QByteArray::const
 {
     unsigned int total = 0;
     bool notifyDataReady = false;
+    std::function<void()> dataReadyCallback;
 
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    if (m_size == 0 || begin == end) {
-        return 0;
-    }
-
-    if (dataType != m_currentDataType)
     {
-        m_suppressed = -1;
-        m_fill = 0;
-        m_head = 0;
-        m_tail = 0;
-        m_currentDataType = dataType;
-    }
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    unsigned int count = static_cast<unsigned int>(end - begin);
-    total = std::min(count, m_size - m_fill);
-
-    if (total < count)
-    {
-        if (m_suppressed < 0)
-        {
-            m_suppressed = 0;
-            m_msgRateTimer = std::chrono::steady_clock::now();
-            qCritical("DataFifo::write: overflow - dropping %u bytes (size=%u)", count - total, m_size);
+        if (m_size == 0 || begin == end) {
+            return 0;
         }
-        else
+
+        if (dataType != m_currentDataType)
         {
-            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - m_msgRateTimer).count();
-            if (elapsedMs > 2500)
+            m_suppressed = -1;
+            m_fill = 0;
+            m_head = 0;
+            m_tail = 0;
+            m_currentDataType = dataType;
+        }
+
+        unsigned int count = static_cast<unsigned int>(end - begin);
+        total = std::min(count, m_size - m_fill);
+
+        if (total < count)
+        {
+            if (m_suppressed < 0)
             {
-                qCritical("DataFifo::write: %u messages dropped", m_suppressed);
-                qCritical("DataFifo::write: overflow - dropping %u bytes", count - total);
-                m_suppressed = -1;
+                m_suppressed = 0;
+                m_msgRateTimer = std::chrono::steady_clock::now();
+                qCritical("DataFifo::write: overflow - dropping %u bytes (size=%u)", count - total, m_size);
             }
             else
             {
-                m_suppressed++;
+                auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - m_msgRateTimer).count();
+                if (elapsedMs > 2500)
+                {
+                    qCritical("DataFifo::write: %u messages dropped", m_suppressed);
+                    qCritical("DataFifo::write: overflow - dropping %u bytes", count - total);
+                    m_suppressed = -1;
+                }
+                else
+                {
+                    m_suppressed++;
+                }
             }
         }
+
+        unsigned int remaining = total;
+
+        while (remaining > 0)
+        {
+            unsigned int len = std::min(remaining, m_size - m_tail);
+            std::copy(begin, begin + len, m_data.begin() + m_tail);
+            m_tail += len;
+            m_tail %= m_size;
+            m_fill += len;
+            begin += len;
+            remaining -= len;
+        }
+
+        notifyDataReady = m_fill > 0;
+        dataReadyCallback = m_dataReadyCallback;
     }
 
-    unsigned int remaining = total;
-
-    while (remaining > 0)
-    {
-        unsigned int len = std::min(remaining, m_size - m_tail);
-        std::copy(begin, begin + len, m_data.begin() + m_tail);
-        m_tail += len;
-        m_tail %= m_size;
-        m_fill += len;
-        begin += len;
-        remaining -= len;
-    }
-
-    notifyDataReady = m_fill > 0;
-
-    if (notifyDataReady && m_dataReadyCallback) {
-        m_dataReadyCallback();
+    if (notifyDataReady && dataReadyCallback) {
+	    dataReadyCallback();
     }
 
     return total;

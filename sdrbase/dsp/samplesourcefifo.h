@@ -22,6 +22,7 @@
 #define SDRBASE_DSP_SAMPLESOURCEFIFO_H_
 
 #include <functional>
+#include <mutex>
 
 #include "samplefifocore.h"
 #include "export.h"
@@ -33,7 +34,10 @@ public:
     ~SampleSourceFifo();
     void resize(unsigned int size);
     void reset();
-    void setDataReadCallback(std::function<void()> callback) { m_dataReadCallback = std::move(callback); }
+    void setDataReadCallback(std::function<void()> callback) {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        m_dataReadCallback = std::move(callback);
+    }
 
     SampleVector& getData() { return m_core.data(); }
     void read(
@@ -66,6 +70,7 @@ public:
 private:
     SampleSourceFifoCore m_core;
     std::function<void()> m_dataReadCallback;
+    mutable std::mutex m_callbackMutex;
 };
 
 #endif // SDRBASE_DSP_SAMPLESOURCEFIFO_H_

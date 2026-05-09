@@ -75,6 +75,8 @@ uint32_t AudioFifo::write(const quint8* data, uint32_t numSamples)
 	uint32_t total;
 	uint32_t remaining;
 	uint32_t copyLen;
+	std::function<void()> dataReadyCallback;
+	std::function<void(int)> overflowCallback;
 
 	if (!m_fifo) {
 		return 0;
@@ -89,10 +91,11 @@ uint32_t AudioFifo::write(const quint8* data, uint32_t numSamples)
 	{
 		if (isFull())
 		{
+			dataReadyCallback = m_dataReadyCallback;
 			mutexLocker.unlock();
 
-			if ((total - remaining > 0) && m_dataReadyCallback) {
-				m_dataReadyCallback();
+			if ((total - remaining > 0) && dataReadyCallback) {
+				dataReadyCallback();
 			}
 
 			return total - remaining; // written so far
@@ -108,18 +111,21 @@ uint32_t AudioFifo::write(const quint8* data, uint32_t numSamples)
 		remaining -= copyLen;
 	}
 
+	dataReadyCallback = m_dataReadyCallback;
+	overflowCallback = m_overflowCallback;
+
 	mutexLocker.unlock();
 
-	if (m_dataReadyCallback) {
-		m_dataReadyCallback();
+	if (dataReadyCallback) {
+		dataReadyCallback();
 	}
 
 	if (total < numSamples)
 	{
 		qCritical("AudioFifo::write: (%s) overflow %u samples",
 			qPrintable(m_label), numSamples - total);
-		if (m_overflowCallback) {
-			m_overflowCallback(numSamples - total);
+		if (overflowCallback) {
+			overflowCallback(numSamples - total);
 		}
 	}
 
@@ -181,29 +187,50 @@ bool AudioFifo::readOne(quint8* data)
 
 uint32_t AudioFifo::writeOne(const quint8* data)
 {
-	std::lock_guard<std::mutex> mutexLocker(m_mutex);
+	std::function<void()> dataReadyCallback;
+	std::function<void(int)> overflowCallback;
+	bool overflowed = false;
 
-	if (!m_fifo) {
+	{
+		std::lock_guard<std::mutex> mutexLocker(m_mutex);
+
+		if (!m_fifo) {
+			return 0;
+		}
+
+        if (isFull())
+        {
+            overflowCallback = m_overflowCallback;
+            overflowed = true;
+        }
+        else
+        {
+            memcpy(m_fifo + (m_tail * m_sampleSize), data, m_sampleSize);
+            m_tail += 1;
+            m_tail %= m_size;
+            m_fill += 1;
+
+			dataReadyCallback = m_dataReadyCallback;
+        }
+	}
+
+	if (overflowed)
+	{
+		if (overflowCallback) {
+			overflowCallback(1);
+		}
 		return 0;
 	}
 
-    if (isFull())
-    {
-        if (m_overflowCallback) {
-            m_overflowCallback(1);
-        }
-        return 0;
-    }
-
-    memcpy(m_fifo + (m_tail * m_sampleSize), data, m_sampleSize);
-    m_tail += 1;
-    m_tail %= m_size;
-    m_fill += 1;
-
-	if (m_dataReadyCallback) {
-		m_dataReadyCallback();
+	if (dataReadyCallback) {
+		dataReadyCallback();
 	}
+
 	return 1;
+
+	if (overflowCallback) {
+		overflowCallback(1);
+	}
 }
 
 uint AudioFifo::drain(uint32_t numSamples)

@@ -81,6 +81,8 @@ void SampleMOFifo::readSync(
     unsigned int& ipart2Begin, unsigned int& ipart2End  // second part offsets
 )
 {
+    std::function<void()> dataReadSyncCallback;
+
     {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         unsigned int spaceLeft = m_size - m_readHead;
@@ -103,9 +105,11 @@ void SampleMOFifo::readSync(
             ipart2End = remaining;
             m_readHead = remaining;
         }
+
+        dataReadSyncCallback = m_dataReadSyncCallback;
     }
-    if (m_dataReadSyncCallback) {
-        m_dataReadSyncCallback();
+    if (dataReadSyncCallback) {
+	    dataReadSyncCallback();
     }
 }
 
@@ -159,6 +163,8 @@ void SampleMOFifo::readAsync(
     unsigned int stream
 )
 {
+    std::function<void(int)> dataReadAsyncCallback;
+
     {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         unsigned int spaceLeft = m_size - m_vReadHead[stream];
@@ -181,9 +187,11 @@ void SampleMOFifo::readAsync(
             ipart2End = remaining;
             m_vReadHead[stream] = remaining;
         }
+
+        dataReadAsyncCallback = m_dataReadAsyncCallback;
     }
-    if (m_dataReadAsyncCallback) {
-        m_dataReadAsyncCallback(static_cast<int>(stream));
+    if (dataReadAsyncCallback) {
+	    dataReadAsyncCallback(static_cast<int>(stream));
     }
 }
 
